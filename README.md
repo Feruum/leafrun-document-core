@@ -93,3 +93,5 @@ go test -race ./... -count=1
 Tests require the real pinned Typst binary and fail when it is unavailable. CI runs on Linux, Windows, and macOS and verifies the example as well as library and CLI behavior. See [the verification record](docs/verification.md) for the tested versions and scenario coverage.
 
 The compatibility wrapper lives in [leafrun-generation](https://github.com/leafrun/leafrun-generation). WASM, server jobs, Git import, S3, and authorization are later stages. No Leafrun project license has been selected; the bundled font has its own OFL license.
+
+Contributions use English and git flow; see [CONTRIBUTING.md](CONTRIBUTING.md) for feature, integration, and release branches.
