@@ -12,7 +12,8 @@ import (
 
 // Render renders a local project with Typst and atomically publishes the PDF.
 // The project and explicit font directories must remain unchanged until Render
-// returns. Concurrent renders must use different output paths.
+// returns. The caller must not change the process working directory during a
+// render. Concurrent renders must use different output paths.
 func Render(ctx context.Context, options RenderOptions) (RenderResult, error) {
 	var result RenderResult
 	if err := ctx.Err(); err != nil {
@@ -54,7 +55,7 @@ func Render(ctx context.Context, options RenderOptions) (RenderResult, error) {
 	defer os.Remove(depsTemp)
 	// runCompiler does not return until CommandContext has killed/waited for a
 	// canceled child. Deferred cleanup cannot race a still-running compiler.
-	compileRaw, err := runCompiler(ctx, engine, paths, pdfTemp, depsTemp)
+	compileRaw, dependencyBase, err := runCompiler(ctx, engine, paths, pdfTemp, depsTemp)
 	result.RawOutput += compileRaw
 	result.Diagnostics = parseDiagnostics(result.RawOutput)
 	if err != nil {
@@ -69,7 +70,7 @@ func Render(ctx context.Context, options RenderOptions) (RenderResult, error) {
 	if err := verifyPDF(pdfTemp); err != nil {
 		return result, failure(ErrorStorage, "verify temporary PDF", err, result.RawOutput)
 	}
-	if err := protectDependencies(paths, depsTemp); err != nil {
+	if err := protectDependencies(paths, depsTemp, dependencyBase); err != nil {
 		var renderErr *RenderError
 		if errors.As(err, &renderErr) {
 			renderErr.RawOutput = result.RawOutput
@@ -134,7 +135,7 @@ func verifyPDF(path string) error {
 	return file.Close()
 }
 
-func protectDependencies(paths projectPaths, depsTemp string) error {
+func protectDependencies(paths projectPaths, depsTemp, dependencyBase string) error {
 	data, err := os.ReadFile(depsTemp)
 	if err != nil {
 		return err
@@ -155,7 +156,7 @@ func protectDependencies(paths projectPaths, depsTemp string) error {
 		}
 		dependency := string(encoded)
 		if !filepath.IsAbs(dependency) {
-			dependency = filepath.Join(paths.root, dependency)
+			dependency = filepath.Join(dependencyBase, dependency)
 		}
 		info, err := os.Stat(dependency)
 		if err != nil {

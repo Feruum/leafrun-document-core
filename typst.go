@@ -37,7 +37,14 @@ func verifyEngine(ctx context.Context) (engine, version, raw string, err error) 
 	return engine, requiredEngineVersion, stderr.String(), nil
 }
 
-func runCompiler(ctx context.Context, engine string, paths projectPaths, pdfTemp, depsTemp string) (string, error) {
+func runCompiler(ctx context.Context, engine string, paths projectPaths, pdfTemp, depsTemp string) (raw, dependencyBase string, err error) {
+	// Typst 0.15.1's zero dependency format is relative to the compiler cwd,
+	// rather than --root. Resolve aliases such as macOS /var -> /private/var
+	// to match the physical directory reported by Rust's current_dir().
+	dependencyBase, err = canonicalDirectory(".")
+	if err != nil {
+		return "", "", fmt.Errorf("resolve compiler working directory: %w", err)
+	}
 	args := []string{"--color", "never", "compile", "--format", "pdf", "--root", paths.root, "--diagnostic-format", "human", "--deps", depsTemp, "--deps-format", "zero"}
 	for _, fontPath := range paths.fonts {
 		args = append(args, "--font-path", fontPath)
@@ -58,5 +65,5 @@ func runCompiler(ctx context.Context, engine string, paths projectPaths, pdfTemp
 	// Every path is absolute. Inheriting the caller's cwd also avoids Windows
 	// CreateProcess limitations on long working-directory paths.
 	output, err := command.CombinedOutput()
-	return string(output), err
+	return string(output), dependencyBase, err
 }

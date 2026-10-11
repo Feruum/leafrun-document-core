@@ -34,6 +34,7 @@ Local verification on **2026-10-11**, Windows amd64, **Go 1.27.0**, **Typst 0.15
 | Parallel renders with separate outputs | `TestRenderParallelDifferentOutputs` |
 | Oversized layout remains a successful render | `TestRenderOversizedLayoutIsAllowed` |
 | Windows long paths | `TestRenderWindowsLongPaths` |
+| Dependency paths relative to compiler cwd | `TestProtectDependenciesUsesCompilerWorkingDirectory`; real Unicode replacement and resource collision tests from an isolated cwd |
 | Inherited custom fonts ignored; explicit paths accepted | `TestRenderIgnoresAmbientCustomFontPathsAndAcceptsExplicitFonts` |
 
 Ordinary documents and compiler failures use the real pinned Typst. A child-process fixture supplies deterministic process cancellation, version faults, and output faults. An unlocated diagnostic is a parser fixture; it is not a fabricated source position. Windows file-symlink tests may skip when the host lacks symlink privileges; junction tests remain mandatory and did run locally.
@@ -44,4 +45,6 @@ Compilation success establishes a PDF artifact, not layout/content quality. PDF 
 
 The current GitHub account can publish contributor branches and PRs but cannot write directly to the Leafrun repositories. A maintainer must accept the core PR and create `v0.1.0` before the Generation dependency can be checked from that released version. The Generation compatibility tests currently use an uncommitted development workspace joining the two repositories; no `replace` or workspace file is shipped.
 
-M01 requires project/font inputs and directory links to stay unchanged during a render. System font files are outside declared-font collision enumeration. Snapshotting mutable projects and server isolation belong to later stages.
+Delivery follows [git flow](../CONTRIBUTING.md): feature PRs target `develop`; `release/0.1.0` carries the accepted core to `main` and the `v0.1.0` tag, with a merge back into `develop`. Upstream repositories currently have only `main`, so their integration branches must be initialized before feature acceptance.
+
+M01 requires project/font inputs and directory links to stay unchanged during a render; the caller must not invoke process-wide `os.Chdir` concurrently. System font files are outside declared-font collision enumeration. Snapshotting mutable projects and server isolation belong to later stages.

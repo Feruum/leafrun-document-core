@@ -77,7 +77,7 @@ The adapter invokes Typst directly with an explicit project root, full human dia
 
 Compilation writes to a unique temporary PDF beside the destination. After successful completion and PDF validation, Leafrun publishes it with the platform's atomic file replacement. Windows uses a dedicated replacement implementation. Failed compilation, cancellation, or a locked output leaves the previous PDF intact. Temporary files are cleaned after the process finishes.
 
-M01 assumes the caller does not modify source files or directory links during a render. Snapshotting mutable projects belongs to M02. This local renderer does not provide a server isolation boundary or judge layout quality. For example, an oversized page element may compile successfully and still need visual review. Typst package imports follow Typst's own package behavior; the included example uses only local files.
+M01 assumes the caller does not modify source files or directory links during a render. The caller must also keep the process working directory unchanged while rendering. Snapshotting mutable projects belongs to M02. This local renderer does not provide a server isolation boundary or judge layout quality. For example, an oversized page element may compile successfully and still need visual review. Typst package imports follow Typst's own package behavior; the included example uses only local files.
 
 ## Verification
 

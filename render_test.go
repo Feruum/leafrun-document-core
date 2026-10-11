@@ -103,20 +103,15 @@ func TestRenderDefaultProjectWithNestedResources(t *testing.T) {
 
 func TestRenderSpaceUnicodePathsAndCustomOutputReplacesOldPDF(t *testing.T) {
 	requireRealTypst(t)
-	root := filepath.Join(testTempDir(t), "project résumé 文档")
+	workingDirectory := testTempDir(t)
+	t.Chdir(workingDirectory)
+	relativeRoot := "project résumé 文档"
+	root := filepath.Join(workingDirectory, relativeRoot)
 	entry := filepath.Join("子 folder", "start file.typ")
 	output := filepath.Join("PDF output", "final résumé.pdf")
 	writeTestFile(t, filepath.Join(root, entry), "= Unicode path\nThe custom entrypoint rendered.\n")
 	old := "%PDF-old output must be replaced on success\n"
 	writeTestFile(t, filepath.Join(root, output), old)
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	relativeRoot, err := filepath.Rel(cwd, root)
-	if err != nil {
-		t.Fatal(err)
-	}
 	result, err := Render(context.Background(), RenderOptions{ProjectDir: relativeRoot, Entrypoint: entry, Output: output})
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +203,9 @@ func TestRenderCannotOverwriteEntrypointOrResource(t *testing.T) {
 	requireRealTypst(t)
 	for _, target := range []string{"main.typ", "resources/data.json", "resources/picture.svg"} {
 		t.Run(target, func(t *testing.T) {
-			root := testTempDir(t)
+			workingDirectory := testTempDir(t)
+			t.Chdir(workingDirectory)
+			root := filepath.Join(workingDirectory, "project")
 			writeTestFile(t, filepath.Join(root, "main.typ"), "#let values = json(\"resources/data.json\")\n#values.title\n#image(\"resources/picture.svg\")\n")
 			writeTestFile(t, filepath.Join(root, "resources/data.json"), `{"title":"Resource protection"}`)
 			writeTestFile(t, filepath.Join(root, "resources/picture.svg"), `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1"/></svg>`)
