@@ -12,7 +12,10 @@ Local verification on **2026-10-11**, Windows amd64, **Go 1.27.0**, **Typst 0.15
 - Compiled CLI demonstration: successful invoice exit `0`, malformed source exit `1`, invalid argument exit `2`. Failed stdout was empty, the old PDF's SHA-256 was unchanged, and no `.leafrun-*` staging files remained.
 - Clean checkout of the published contributor branch, with `GOWORK=off`: the official pinned installer, CLI build, and bundled invoice render passed. Replacing the source with an invalid document returned exit `1`, retained the previous PDF's SHA-256, and left no staging files; the fixture was restored and the checkout remained clean.
 - Negative integration check with Typst removed from `PATH`: the real-render test failed with exit `1` and an installation message, rather than skipping.
-- Linux amd64 and Darwin arm64 test binaries were cross-compiled on Windows; they were not executed locally. CI supplies native Linux/macOS checks and Linux `-race`.
+- Linux amd64 and Darwin arm64 test binaries were cross-compiled on Windows; they were not executed locally.
+- [Native GitHub CI for implementation commit `5fed57a`](https://github.com/Feruum/leafrun-document-core/actions/runs/38158971617) passed on Linux, Windows, and macOS. Each job installed Typst 0.15.1, ran the test suite and vet, built the CLI, and rendered the bundled invoice. The Linux race detector also passed.
+
+The first native run found two portability issues: a Windows test tried to calculate a relative path across different drives, and the dependency guard incorrectly treated Typst's cwd-relative dependency paths as project-relative. The fixture now uses an isolated working directory, and the adapter captures the canonical compiler cwd. A deterministic dependency fixture reproduced the latter failure before the fix; the corrected real-engine tests and the three-platform rerun passed.
 
 ## Scenario coverage
 
