@@ -1,0 +1,6 @@
+.tools/
+.cache/
+bin/
+*.pdf
+*.exe
+/leafrun

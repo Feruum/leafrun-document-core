@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Go and Typst (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.0'
+          cache: false
+      - name: Install pinned Typst
+        shell: pwsh
+        run: ./scripts/install-typst.ps1
+      - name: Test real renderer and CLI
+        run: go test ./... -count=1 -v
+      - name: Vet
+        run: go vet ./...
+      - name: Build CLI
+        run: go build ./cmd/leafrun
+      - name: Render bundled invoice
+        run: go run ./cmd/leafrun render --project ./examples/invoice
+      - name: Race detector
+        if: runner.os == 'Linux'
+        run: go test -race ./... -count=1

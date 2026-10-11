@@ -1,0 +1,7 @@
+{
+  "number": "INV-001",
+  "customer": "Leafrun Example",
+  "currency": "KZT",
+  "items": [{"description": "Document rendering", "quantity": 1, "total": 35000}],
+  "total": 35000
+}
