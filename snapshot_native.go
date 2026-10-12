@@ -98,12 +98,19 @@ func (native *snapshotNativeFS) Open(name string) (fs.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	file, err := native.handle.Open(localized)
+	file, err := openSnapshotNativeHandle(native.handle, localized)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(ErrSourceChanged, err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return nil, errors.Join(err, file.Close())
+	}
+	if !ordinarySnapshotMode(info.Mode()) {
+		return nil, errors.Join(ErrSourceChanged, fmt.Errorf("%q must be an ordinary file or directory without links", name), file.Close())
 	}
 	if _, err := native.nativePath(name); err != nil {
-		return nil, errors.Join(err, file.Close())
+		return nil, errors.Join(ErrSourceChanged, err, file.Close())
 	}
 	return file, nil
 }
@@ -239,7 +246,7 @@ func retainSnapshotInputs(ctx context.Context, protected []string, scan snapshot
 func snapshotNativeIdentity(path string, before fs.FileInfo) (fs.FileInfo, error) {
 	info, err := snapshotNativeFileInfo(path)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(ErrSourceChanged, err)
 	}
 	if !info.Mode().IsRegular() || info.Size() != before.Size() || !info.ModTime().Equal(before.ModTime()) {
 		return nil, ErrSourceChanged
@@ -256,11 +263,14 @@ func snapshotNativeFileInfo(path string) (fs.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	file, err := root.Open(filepath.Base(path))
+	file, err := openSnapshotNativeHandle(root, filepath.Base(path))
 	if err != nil {
 		return nil, errors.Join(err, root.Close())
 	}
 	info, statErr := file.Stat()
+	if statErr == nil && !ordinarySnapshotMode(info.Mode()) {
+		statErr = errors.Join(ErrSourceChanged, fmt.Errorf("%q must be an ordinary file or directory without links", path))
+	}
 	if err := errors.Join(statErr, file.Close(), root.Close()); err != nil {
 		return nil, err
 	}
