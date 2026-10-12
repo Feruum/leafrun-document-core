@@ -394,7 +394,11 @@ func TestSnapshotCapturesDeclaredFontDirectoriesInOrder(t *testing.T) {
 	if len(manifest.Fonts) != 4 {
 		t.Fatalf("font directories = %+v", manifest.Fonts)
 	}
-	if manifest.Fonts[0].Path != "fonts" || manifest.Fonts[1].Path != "alternate" || manifest.Fonts[2].InProject || manifest.Fonts[2].SourcePath != first {
+	canonicalFirst, err := canonicalDirectory(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Fonts[0].Path != "fonts" || manifest.Fonts[1].Path != "alternate" || manifest.Fonts[2].InProject || manifest.Fonts[2].SourcePath != canonicalFirst {
 		t.Fatalf("font order/provenance = %+v", manifest.Fonts)
 	}
 	if snapshot.Manifest().ID == capture([]string{"alternate", second, first}).Manifest().ID {
@@ -712,6 +716,13 @@ func TestSnapshotSelectedNativeRootAliasesAreCanonicalized(t *testing.T) {
 	defer snapshot.Close()
 	if len(snapshot.Manifest().Fonts) != 1 || len(snapshot.inputs) != 2 {
 		t.Fatalf("alias lost captured inputs or font manifest: %+v", snapshot.Manifest())
+	}
+	canonicalProject, err := canonicalDirectory(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if font := snapshot.Manifest().Fonts[0]; font.SourcePath != canonicalProject || font.SourcePath == alias {
+		t.Fatalf("selected font alias did not retain canonical provenance: %+v", font)
 	}
 }
 
