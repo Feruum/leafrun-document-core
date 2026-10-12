@@ -229,6 +229,16 @@ func (folder *folderFS) snapshotVerifySource(ctx context.Context) error {
 			}
 		}
 	}
+	// Excluded leaves can change after their last directory scan. Recheck only
+	// their kind; ordinary output replacements and removals remain permitted.
+	for _, selected := range folder.owner.results {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := validateFolderResultFile(selected); err != nil {
+			return &fs.PathError{Op: "verify", Path: selected, Err: errors.Join(ErrSourceChanged, err)}
+		}
+	}
 	return ctx.Err()
 }
 

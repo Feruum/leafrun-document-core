@@ -65,3 +65,31 @@ func TestFolderSourceRejectsSelectedNativeSpecialFileDuringAcquisition(t *testin
 		t.Fatalf("selected special file was not rejected during acquisition: %v, %v", snapshot, err)
 	}
 }
+
+func TestFolderSourceChecksSelectedSpecialFileAfterAllHashes(t *testing.T) {
+	root, storage := t.TempDir(), t.TempDir()
+	writeFolderFile(t, root, "main.typ", "document")
+	writeFolderFile(t, root, "resource.json", "resource")
+	writeFolderFile(t, root, "output/result.pdf", "old result")
+	source := &folderHookSource{source: FolderSource{Root: root}}
+	source.onClose = func(name string, pass int) {
+		if name != "main.typ" || pass != 3 {
+			return
+		}
+		selected := filepath.Join(root, "output", "result.pdf")
+		if err := os.Remove(selected); err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Mkfifo(selected, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot, err := CreateSnapshot(context.Background(), source, SnapshotOptions{Output: "output/result.pdf", TempDir: storage})
+	if snapshot != nil {
+		snapshot.Close()
+	}
+	if snapshot != nil || !errors.Is(err, ErrSourceChanged) {
+		t.Fatalf("selected special file bypassed final verification: %v, %v", snapshot, err)
+	}
+	requireEmptyFolderStorage(t, storage)
+}
