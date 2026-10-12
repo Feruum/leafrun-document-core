@@ -255,6 +255,12 @@ type snapshotInputMetadataSource interface {
 	snapshotInputMetadata(context.Context) ([]snapshotInput, error)
 }
 
+// Source-specific identities can require a final check after all byte hashes.
+// These identities remain separate from regular-file publication guard inputs.
+type snapshotSourceVerifier interface {
+	snapshotVerifySource(context.Context) error
+}
+
 func snapshotFailure(stage SnapshotStage, path string, cause error) *SnapshotError {
 	return &SnapshotError{Stage: stage, Path: path, Cause: cause}
 }

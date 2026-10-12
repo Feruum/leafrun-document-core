@@ -193,6 +193,11 @@ func captureSnapshot(ctx context.Context, source SourceTree, options SnapshotOpt
 	if originalErr := verifySnapshotInputs(ctx, inputs); originalErr != nil {
 		verifyErr = errors.Join(verifyErr, snapshotFailure(SnapshotStageVerify, "", originalErr))
 	}
+	if verifier, ok := source.FS.(snapshotSourceVerifier); ok {
+		if sourceErr := verifier.snapshotVerifySource(ctx); sourceErr != nil {
+			verifyErr = errors.Join(verifyErr, snapshotFailure(SnapshotStageVerify, "", sourceErr))
+		}
+	}
 	if err = errors.Join(copyErr, verifyErr, ctx.Err()); err != nil {
 		return nil, err
 	}

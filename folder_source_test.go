@@ -657,6 +657,13 @@ func (filesystem *folderHookFS) snapshotInputMetadata(ctx context.Context) ([]sn
 	return nil, nil
 }
 
+func (filesystem *folderHookFS) snapshotVerifySource(ctx context.Context) error {
+	if verifier, ok := filesystem.FS.(snapshotSourceVerifier); ok {
+		return verifier.snapshotVerifySource(ctx)
+	}
+	return nil
+}
+
 func writeFolderFile(t *testing.T, root, name, data string) {
 	t.Helper()
 	filename := filepath.Join(root, filepath.FromSlash(name))

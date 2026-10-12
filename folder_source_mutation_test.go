@@ -118,6 +118,65 @@ func TestFolderSourceDetectsReplacementBetweenScanAndNativeMetadataRetention(t *
 	}
 }
 
+func TestFolderSourceChecksDirectoryIdentityAfterFinalHashPass(t *testing.T) {
+	for _, kind := range []string{"project", "additional-fonts"} {
+		t.Run(kind, func(t *testing.T) {
+			root, fonts, storage := t.TempDir(), t.TempDir(), t.TempDir()
+			writeFolderFile(t, root, "z.typ", "document")
+			selectedRoot := root
+			options := SnapshotOptions{TempDir: storage}
+			if kind == "additional-fonts" {
+				selectedRoot = fonts
+				writeFolderFile(t, fonts, "z.ttf", "font")
+				options.FontPaths = []string{fonts}
+			}
+			selected := filepath.Join(selectedRoot, "empty")
+			if err := os.Mkdir(selected, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			before, err := snapshotNativeFileInfo(selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := &folderHookSource{source: FolderSource{Root: root}}
+			hook := source
+			if kind == "additional-fonts" {
+				hook = &folderHookSource{counts: make(map[string]int)}
+				source.wrapFontFS = func(_ string, filesystem fs.FS) fs.FS { return &folderHookFS{FS: filesystem, source: hook} }
+			}
+			kept := filepath.Join(t.TempDir(), "original-directory")
+			hook.onClose = func(name string, pass int) {
+				if name != "empty" || pass != 2 {
+					return
+				}
+				if err := os.Rename(selected, kept); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(selected, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chtimes(selected, before.ModTime(), before.ModTime()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshot, err := CreateSnapshot(context.Background(), source, options)
+			if snapshot != nil {
+				snapshot.Close()
+			}
+			if snapshot != nil || !errors.Is(err, ErrSourceChanged) {
+				t.Fatalf("same-time directory replacement during final scan accepted: %v, %v", snapshot, err)
+			}
+			if source.opens != 1 || source.releases != 1 {
+				t.Fatalf("final directory validation lifecycle = %d/%d", source.opens, source.releases)
+			}
+			if hook.counts["empty"] != 2 {
+				t.Fatalf("directory identity check retried source reads: %d", hook.counts["empty"])
+			}
+			requireEmptyFolderStorage(t, storage)
+		})
+	}
+}
+
 func TestFolderSourceClassifiesDisappearanceBetweenScanAndMetadataRetention(t *testing.T) {
 	root, storage := t.TempDir(), t.TempDir()
 	writeFolderFile(t, root, "main.typ", "AAAA")

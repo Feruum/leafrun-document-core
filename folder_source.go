@@ -194,17 +194,48 @@ func (folder *folderFS) snapshotInputMetadata(ctx context.Context) ([]snapshotIn
 	return []snapshotInput{input}, ctx.Err()
 }
 
-// Resolve existing aliases, then append only the absent suffix. A not-yet
-// generated result can be selected without creating directories in the source.
+func (folder *folderFS) snapshotVerifySource(ctx context.Context) error {
+	folder.owner.mu.Lock()
+	trees := make([]*folderFS, 0, len(folder.owner.trees))
+	for _, tree := range folder.owner.trees {
+		trees = append(trees, tree)
+	}
+	folder.owner.mu.Unlock()
+	sort.Slice(trees, func(i, j int) bool { return trees[i].native.root < trees[j].native.root })
+	for _, tree := range trees {
+		// Closing a directory during the final scan can precede later hashes.
+		// Recheck its retained native identity before accepting the capture.
+		tree.mu.Lock()
+		directories := make(map[string]fs.FileInfo)
+		names := []string{}
+		for name, info := range tree.identities {
+			if info.IsDir() {
+				directories[name] = info
+				names = append(names, name)
+			}
+		}
+		tree.mu.Unlock()
+		sort.Strings(names)
+		for _, name := range names {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			info, err := tree.native.Stat(name)
+			if err != nil {
+				return &fs.PathError{Op: "verify", Path: filepath.Join(tree.native.root, filepath.FromSlash(name)), Err: errors.Join(ErrSourceChanged, err)}
+			}
+			if info.Mode().Type() != fs.ModeDir || !os.SameFile(directories[name], info) {
+				return &fs.PathError{Op: "verify", Path: filepath.Join(tree.native.root, filepath.FromSlash(name)), Err: ErrSourceChanged}
+			}
+		}
+	}
+	return ctx.Err()
+}
+
+// Resolve parent directory aliases, then append the ordinary result or absent
+// suffix. The selected file itself must never be a link or special file.
 func resolveFolderResult(absolute string) (string, error) {
-	resolved, err := resolvePath(absolute)
-	if err == nil {
-		return resolved, nil
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		return "", err
-	}
-	if _, statErr := os.Lstat(absolute); statErr == nil {
+	if err := validateFolderResultFile(absolute); err != nil {
 		return "", err
 	}
 	suffix := []string{filepath.Base(absolute)}
@@ -214,6 +245,9 @@ func resolveFolderResult(absolute string) (string, error) {
 			for i := len(suffix) - 1; i >= 0; i-- {
 				canonical = filepath.Join(canonical, suffix[i])
 			}
+			if err := validateFolderResultFile(canonical); err != nil {
+				return "", err
+			}
 			return canonical, nil
 		}
 		if !errors.Is(parentErr, fs.ErrNotExist) || filepath.Dir(parent) == parent {
@@ -221,6 +255,26 @@ func resolveFolderResult(absolute string) (string, error) {
 		}
 		suffix = append(suffix, filepath.Base(parent))
 	}
+}
+
+func validateFolderResultFile(name string) error {
+	info, err := os.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode().IsRegular() {
+		return nil
+	}
+	var targetErr error
+	if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
+		// Preserve the missing-target cause for a dangling link while refusing
+		// to treat a link's target as the selected ordinary result.
+		_, targetErr = os.Stat(name)
+	}
+	return errors.Join(errors.New("selected folder result must be an ordinary file without links"), targetErr)
 }
 
 func folderSamePath(first, second string) bool {
@@ -258,7 +312,7 @@ func (folder *folderFS) excluded(name string, mode fs.FileMode) bool {
 		return true
 	}
 	for _, selected := range folder.owner.results {
-		if folderSamePath(absolute, selected) && !mode.IsDir() {
+		if folderSamePath(absolute, selected) && mode.IsRegular() {
 			return true
 		}
 	}
