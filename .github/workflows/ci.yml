@@ -25,7 +25,17 @@ jobs:
         shell: pwsh
         run: ./scripts/install-typst.ps1
       - name: Test real renderer and CLI
-        run: go test ./... -count=1 -v
+        shell: pwsh
+        run: |
+          $testLog = Join-Path $env:RUNNER_TEMP 'leafrun-test.log'
+          go test ./... -count=1 -v 2>&1 | Tee-Object -FilePath $testLog
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            @('### Go test failure', '', '```text') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            Get-Content -LiteralPath $testLog | Select-Object -Last 200 | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+          exit $testExit
       - name: Vet
         run: go vet ./...
       - name: Build CLI
