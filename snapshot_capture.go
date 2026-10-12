@@ -127,7 +127,15 @@ func captureSnapshot(ctx context.Context, source SourceTree, options SnapshotOpt
 		trees = append(trees, snapshotCaptureTree{fsys: fontFS, storage: storage, scan: fontScan, nativeRoot: fontRoot})
 		manifest.Fonts = append(manifest.Fonts, SnapshotFont{Path: ".", SourcePath: fontRoot, Files: manifestFiles(fontScan), Directories: manifestDirs(fontScan)})
 	}
-	if err := rejectSnapshotStorage(options.TempDir, source.ProtectedPaths, trees); err != nil {
+	tempDir := options.TempDir
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
+	tempDir, err = canonicalDirectory(tempDir)
+	if err != nil {
+		return nil, snapshotFailure(SnapshotStageValidate, "", err)
+	}
+	if err := rejectSnapshotStorage(tempDir, source.ProtectedPaths, trees); err != nil {
 		return nil, snapshotFailure(SnapshotStageValidate, "", err)
 	}
 	inputs, err := retainSnapshotInputs(ctx, source.ProtectedPaths, project, false)
@@ -141,7 +149,9 @@ func captureSnapshot(ctx context.Context, source SourceTree, options SnapshotOpt
 		}
 		inputs = append(inputs, fontInputs...)
 	}
-	root, err := os.MkdirTemp(options.TempDir, "leafrun-snapshot-*")
+	// Allocate and retain canonical paths so later alias or environment changes
+	// cannot redirect accepted snapshot bytes, cleanup, or compiler storage.
+	root, err := os.MkdirTemp(tempDir, "leafrun-snapshot-*")
 	if err != nil {
 		return nil, snapshotFailure(SnapshotStageStorage, "", err)
 	}
@@ -186,7 +196,7 @@ func captureSnapshot(ctx context.Context, source SourceTree, options SnapshotOpt
 	if manifest.Origin.Kind == "folder" {
 		manifest.Origin.Revision = manifest.ID
 	}
-	return &Snapshot{root: root, tempDir: options.TempDir, manifest: manifest, cleanup: os.RemoveAll, files: make(map[*snapshotOpenFile]struct{}), inputs: inputs, limits: limits, fsInfo: snapshotReadInfo(project)}, nil
+	return &Snapshot{root: root, tempDir: tempDir, manifest: manifest, cleanup: os.RemoveAll, files: make(map[*snapshotOpenFile]struct{}), inputs: inputs, limits: limits, fsInfo: snapshotReadInfo(project)}, nil
 }
 
 func snapshotReadInfo(scan snapshotScan) map[string]snapshotFileInfo {
@@ -219,6 +229,20 @@ func snapshotLimits(limits SnapshotLimits) (SnapshotLimits, error) {
 func validSnapshotPath(name string) bool {
 	if !fs.ValidPath(name) || strings.Contains(name, `\`) {
 		return false
+	}
+	if runtime.GOOS == "windows" && name != "." {
+		for _, component := range strings.Split(name, "/") {
+			// Win32 strips trailing dots/spaces and rejects these characters.
+			// Such logical entries cannot be materialized without divergence.
+			if strings.TrimRight(component, ". ") != component || strings.ContainsAny(component, `<>:"|?*`) {
+				return false
+			}
+			for _, character := range component {
+				if character < 32 {
+					return false
+				}
+			}
+		}
 	}
 	_, err := filepath.Localize(name)
 	return err == nil

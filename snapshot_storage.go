@@ -167,7 +167,15 @@ func (snapshot *Snapshot) prepareWorkingCopy(ctx context.Context) (working *snap
 	if err := ctx.Err(); err != nil {
 		return nil, snapshotFailure(SnapshotStagePrepare, "", err)
 	}
-	storage, err := os.MkdirTemp(snapshot.tempDir, "leafrun-work-*")
+	tempDir, err := canonicalDirectory(snapshot.tempDir)
+	if err != nil {
+		return nil, snapshotFailure(SnapshotStagePrepare, "", err)
+	}
+	parentRelative, err := filepath.Rel(snapshot.tempDir, tempDir)
+	if err != nil || parentRelative != "." {
+		return nil, snapshotFailure(SnapshotStagePrepare, "", errors.Join(errors.New("snapshot temporary storage parent changed"), err))
+	}
+	storage, err := os.MkdirTemp(tempDir, "leafrun-work-*")
 	if err != nil {
 		return nil, snapshotFailure(SnapshotStagePrepare, "", err)
 	}
