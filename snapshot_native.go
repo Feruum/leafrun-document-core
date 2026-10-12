@@ -159,8 +159,13 @@ func rejectSnapshotStorage(tempDir string, protected []string, trees []snapshotC
 	return nil
 }
 
-func retainSnapshotInputs(ctx context.Context, protected []string, scan snapshotScan, font bool) ([]snapshotInput, error) {
-	inputs := []snapshotInput{}
+func retainSnapshotInputs(ctx context.Context, protected []string, scan snapshotScan, font bool) (inputs []snapshotInput, err error) {
+	defer func() {
+		if errors.Is(err, fs.ErrNotExist) {
+			err = errors.Join(ErrSourceChanged, err)
+		}
+	}()
+	inputs = []snapshotInput{}
 	for _, original := range protected {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -232,6 +237,17 @@ func retainSnapshotInputs(ctx context.Context, protected []string, scan snapshot
 // Stat/Lstat defer it until SameFile, which may run after release deletes a
 // checkout or replaces an archive at the original path.
 func snapshotNativeIdentity(path string, before fs.FileInfo) (fs.FileInfo, error) {
+	info, err := snapshotNativeFileInfo(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() != before.Size() || !info.ModTime().Equal(before.ModTime()) {
+		return nil, ErrSourceChanged
+	}
+	return info, nil
+}
+
+func snapshotNativeFileInfo(path string) (fs.FileInfo, error) {
 	parent, err := canonicalDirectory(filepath.Dir(path))
 	if err != nil {
 		return nil, err
@@ -248,9 +264,6 @@ func snapshotNativeIdentity(path string, before fs.FileInfo) (fs.FileInfo, error
 	if err := errors.Join(statErr, file.Close(), root.Close()); err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Size() != before.Size() || !info.ModTime().Equal(before.ModTime()) {
-		return nil, ErrSourceChanged
-	}
 	return info, nil
 }
 
@@ -258,6 +271,9 @@ func verifySnapshotInputs(ctx context.Context, inputs []snapshotInput) error {
 	for _, input := range inputs {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if input.excluded {
+			continue
 		}
 		info, err := os.Lstat(input.path)
 		if err != nil {

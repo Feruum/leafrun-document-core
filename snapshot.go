@@ -238,6 +238,7 @@ type snapshotView struct{ snapshot *Snapshot }
 type snapshotInput struct {
 	path, projectPath string
 	font              bool
+	excluded          bool
 	info              fs.FileInfo
 }
 
@@ -246,6 +247,12 @@ type snapshotOptionsSource interface {
 }
 type snapshotNativeFontSource interface {
 	snapshotFontFS(root string) (fs.FS, error)
+}
+
+// Optional source metadata protects excluded native results without copying
+// their bytes or making generated-result activity part of source verification.
+type snapshotInputMetadataSource interface {
+	snapshotInputMetadata(context.Context) ([]snapshotInput, error)
 }
 
 func snapshotFailure(stage SnapshotStage, path string, cause error) *SnapshotError {

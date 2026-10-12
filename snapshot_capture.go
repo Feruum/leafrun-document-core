@@ -149,6 +149,13 @@ func captureSnapshot(ctx context.Context, source SourceTree, options SnapshotOpt
 		}
 		inputs = append(inputs, fontInputs...)
 	}
+	if provider, ok := source.FS.(snapshotInputMetadataSource); ok {
+		metadata, metadataErr := provider.snapshotInputMetadata(ctx)
+		if metadataErr != nil {
+			return nil, snapshotFailure(SnapshotStageScan, "", metadataErr)
+		}
+		inputs = append(inputs, metadata...)
+	}
 	// Allocate and retain canonical paths so later alias or environment changes
 	// cannot redirect accepted snapshot bytes, cleanup, or compiler storage.
 	root, err := os.MkdirTemp(tempDir, "leafrun-snapshot-*")
