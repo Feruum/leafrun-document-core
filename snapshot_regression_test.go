@@ -3,6 +3,7 @@ package documentcore
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -159,5 +160,59 @@ func TestSnapshotWindowsAcceptedNamesRoundTripThroughNativeStorage(t *testing.T)
 		if err != nil || string(data) != name {
 			t.Errorf("accepted logical path %q changed in native storage: %q, %v", name, data, err)
 		}
+	}
+}
+
+func TestSnapshotLogicalFilesystemRejectsCaseAliasesConsistently(t *testing.T) {
+	input := fstest.MapFS{"main.typ": &fstest.MapFile{Data: []byte("captured")}, "nested/main.typ": &fstest.MapFile{Data: []byte("captured")}}
+	snapshot, err := CreateSnapshot(context.Background(), &snapshotTestSource{tree: SourceTree{FS: input}}, SnapshotOptions{TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapshot.Close()
+	filesystem := snapshot.FS()
+	for _, name := range []string{"MAIN.TYP", "NESTED", "Nested/main.typ", "nested/MAIN.TYP"} {
+		t.Run(name, func(t *testing.T) {
+			file, openErr := filesystem.Open(name)
+			if file != nil {
+				info, statErr := file.Stat()
+				data, readErr := io.ReadAll(file)
+				if err := file.Close(); err != nil {
+					t.Error(err)
+				}
+				t.Errorf("unknown logical path opened: Stat=%v, %v; Read=%q, %v", info, statErr, data, readErr)
+			}
+			var logicalError *fs.PathError
+			if !errors.Is(openErr, fs.ErrNotExist) || !errors.As(openErr, &logicalError) || logicalError.Op != "open" || logicalError.Path != name {
+				t.Errorf("Open(%q) did not return a logical not-exist error: %v", name, openErr)
+			}
+			if _, err := fs.Stat(filesystem, name); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("Stat(%q) = %v", name, err)
+			}
+			if data, err := fs.ReadFile(filesystem, name); !errors.Is(err, fs.ErrNotExist) || len(data) != 0 {
+				t.Errorf("ReadFile(%q) = %q, %v", name, data, err)
+			}
+		})
+	}
+	for _, name := range []string{"main.typ", "nested/main.typ"} {
+		file, err := filesystem.Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, statErr := file.Stat()
+		data, readErr := io.ReadAll(file)
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if statErr != nil || info.Name() != "main.typ" || readErr != nil || string(data) != "captured" {
+			t.Errorf("exact path %q was inconsistent: Stat=%v, %v; Read=%q, %v", name, info, statErr, data, readErr)
+		}
+		data, err = fs.ReadFile(filesystem, name)
+		if err != nil || string(data) != "captured" {
+			t.Errorf("ReadFile(%q) = %q, %v", name, data, err)
+		}
+	}
+	if err := fstest.TestFS(filesystem, "main.typ", "nested/main.typ"); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -30,6 +30,9 @@ func (view snapshotView) Open(name string) (fs.File, error) {
 	if !validSnapshotPath(name) {
 		return nil, snapshotFSError("open", name, fs.ErrInvalid)
 	}
+	if _, exists := snapshot.fsInfo[name]; !exists {
+		return nil, snapshotFSError("open", name, fs.ErrNotExist)
+	}
 	localized, err := filepath.Localize(name)
 	if err != nil {
 		return nil, snapshotFSError("open", name, err)
