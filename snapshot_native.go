@@ -282,7 +282,7 @@ func verifySnapshotInputs(ctx context.Context, inputs []snapshotInput) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if input.excluded {
+		if input.excluded || input.guardOnly {
 			continue
 		}
 		info, err := os.Lstat(input.path)
@@ -294,4 +294,62 @@ func verifySnapshotInputs(ctx context.Context, inputs []snapshotInput) error {
 		}
 	}
 	return nil
+}
+
+// Eager guards take precedence over reopening a duplicate protected path. They
+// protect identities only; mutable provider metadata is never a consistency
+// input and need not correspond to paths in the immutable exported FS.
+func retainNativeProtection(guards []NativeProtection, protected []string, tempDir string) ([]snapshotInput, []string, error) {
+	inputs := make([]snapshotInput, 0, len(guards))
+	for _, guard := range guards {
+		if !filepath.IsAbs(guard.Path) || filepath.Clean(guard.Path) != guard.Path || guard.Info == nil || !ordinarySnapshotMode(guard.Info.Mode()) || guard.Info.Sys() == nil || !os.SameFile(guard.Info, guard.Info) {
+			return nil, nil, fmt.Errorf("native protection requires an absolute canonical path and ordinary native handle identity")
+		}
+		// Resolve only the parent association, including its nearest existing
+		// ancestor. Never reopen the accepted file or metadata directory itself.
+		parent, err := resolveGuardParent(filepath.Dir(guard.Path))
+		if err != nil || !folderSamePath(parent, filepath.Dir(guard.Path)) {
+			return nil, nil, errors.Join(errors.New("native protection parent association is not canonical"), err)
+		}
+		if guard.Info.IsDir() && isContained(guard.Path, tempDir) {
+			return nil, nil, fmt.Errorf("snapshot temporary storage must be outside protected directory %q", guard.Path)
+		}
+		inputs = append(inputs, snapshotInput{path: guard.Path, info: guard.Info, guardOnly: true})
+	}
+	remaining := []string{}
+	for _, original := range protected {
+		absolute, err := filepath.Abs(original)
+		if err != nil {
+			return nil, nil, err
+		}
+		eager := false
+		for _, guard := range guards {
+			if folderSamePath(absolute, guard.Path) {
+				eager = true
+				break
+			}
+		}
+		if !eager {
+			remaining = append(remaining, original)
+		}
+	}
+	return inputs, remaining, nil
+}
+
+func resolveGuardParent(parent string) (string, error) {
+	current := parent
+	for {
+		canonical, err := resolvePath(current)
+		if err == nil {
+			relative, err := filepath.Rel(current, parent)
+			if err != nil {
+				return "", err
+			}
+			return filepath.Join(canonical, relative), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) || filepath.Dir(current) == current {
+			return "", err
+		}
+		current = filepath.Dir(current)
+	}
 }

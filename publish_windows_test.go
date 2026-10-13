@@ -68,3 +68,36 @@ func TestRenderWindowsLongPaths(t *testing.T) {
 	}
 	requirePDF(t, result.PDFPath)
 }
+
+func TestRenderSnapshotWindowsLockedOutputLeavesOldPDF(t *testing.T) {
+	requireRealTypst(t)
+	root := testTempDir(t)
+	writeTestFile(t, filepath.Join(root, "main.typ"), "Frozen locked output")
+	snapshot, err := CreateSnapshot(context.Background(), FolderSource{Root: root}, SnapshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapshot.Close()
+	output := filepath.Join(testTempDir(t), "old.pdf")
+	old := "%PDF-old locked snapshot output"
+	writeTestFile(t, output, old)
+	path, err := syscall.UTF16PtrFromString(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := syscall.CreateFile(path, syscall.GENERIC_READ, syscall.FILE_SHARE_READ, nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.CloseHandle(handle)
+	result, err := RenderSnapshot(context.Background(), snapshot, RenderSnapshotOptions{Output: output})
+	requireErrorKind(t, err, ErrorStorage)
+	if result.PDFPath != "" {
+		t.Fatal("locked output published")
+	}
+	data, err := os.ReadFile(output)
+	if err != nil || string(data) != old {
+		t.Fatal("locked PDF changed")
+	}
+	requireNoRenderTemps(t, filepath.Dir(output))
+}

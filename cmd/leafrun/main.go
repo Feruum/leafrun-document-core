@@ -10,7 +10,7 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	code := cli.Run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	code := cli.RunWithSources(ctx, os.Args[1:], os.Stdout, os.Stderr, providerSource)
 	stop()
 	os.Exit(code)
 }

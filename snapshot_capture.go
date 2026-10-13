@@ -135,13 +135,18 @@ func captureSnapshot(ctx context.Context, source SourceTree, options SnapshotOpt
 	if err != nil {
 		return nil, snapshotFailure(SnapshotStageValidate, "", err)
 	}
-	if err := rejectSnapshotStorage(tempDir, source.ProtectedPaths, trees); err != nil {
+	guardInputs, protected, err := retainNativeProtection(source.NativeProtection, source.ProtectedPaths, tempDir)
+	if err != nil {
+		return nil, snapshotFailure(SnapshotStageValidate, "native protection", err)
+	}
+	if err := rejectSnapshotStorage(tempDir, protected, trees); err != nil {
 		return nil, snapshotFailure(SnapshotStageValidate, "", err)
 	}
-	inputs, err := retainSnapshotInputs(ctx, source.ProtectedPaths, project, false)
+	inputs, err := retainSnapshotInputs(ctx, protected, project, false)
 	if err != nil {
 		return nil, snapshotFailure(SnapshotStageScan, "", err)
 	}
+	inputs = append(inputs, guardInputs...)
 	for _, tree := range trees[1:] {
 		fontInputs, err := retainSnapshotInputs(ctx, []string{tree.nativeRoot}, tree.scan, true)
 		if err != nil {

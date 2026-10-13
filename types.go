@@ -1,4 +1,4 @@
-// Package documentcore renders a local Typst project to PDF using Typst 0.15.1.
+// Package documentcore renders local and immutable Typst projects to PDF using Typst 0.15.1.
 package documentcore
 
 import "strings"
@@ -39,7 +39,8 @@ type Trace struct {
 	Location *Location `json:"location"`
 }
 
-// Location preserves Typst's emitted path and one-based line and column.
+// Location preserves Typst's one-based line and column. Render preserves the
+// emitted path; snapshot renders normalize project paths to logical slash paths.
 // A nil location means Typst did not emit a position for that diagnostic/frame.
 type Location struct {
 	Path   string `json:"path"`

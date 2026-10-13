@@ -19,12 +19,24 @@ type ProjectSource interface {
 // SourceTree is a project rooted at "." in FS. Close must release the source
 // and is called exactly once before CreateSnapshot returns. ProtectedPaths are
 // original native inputs whose identities must survive source release for
-// output guards. Native directories mirror the relative paths in FS.
+// output guards. Protected native directories mirror relative paths in FS;
+// NativeProtection is guard-only and need not mirror exported project content.
 type SourceTree struct {
 	FS             fs.FS
 	Origin         SourceOrigin
 	Close          func() error
 	ProtectedPaths []string
+	// NativeProtection contains eager original identities, separate from FS.
+	NativeProtection []NativeProtection
+}
+
+// NativeProtection guards a canonical absolute original path and native identity
+// acquired from an opened handle. Directories protect their entire path prefix;
+// files also protect hardlink aliases after the original is replaced or removed.
+// Guard-only metadata is never hashed or compared to the exported project tree.
+type NativeProtection struct {
+	Path string
+	Info fs.FileInfo
 }
 
 // SourceOrigin records provenance independently of the content identity.
@@ -239,6 +251,7 @@ type snapshotInput struct {
 	path, projectPath string
 	font              bool
 	excluded          bool
+	guardOnly         bool
 	info              fs.FileInfo
 }
 
