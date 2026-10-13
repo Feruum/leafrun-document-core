@@ -121,6 +121,8 @@ func prepareSnapshotPaths(ctx context.Context, working *snapshotWorkingCopy, sna
 	if err != nil {
 		return paths, err
 	}
+	// Native Windows extended spelling denotes the same original association.
+	paths.requestedOutput = compilerNativePath(paths.output)
 	if err := validateOutput(paths.output); err != nil {
 		return paths, err
 	}
@@ -129,7 +131,7 @@ func prepareSnapshotPaths(ctx context.Context, working *snapshotWorkingCopy, sna
 		return paths, failure(ErrorStorage, "resolve output path", err, "")
 	}
 	paths.output = resolved
-	if isContained(working.storage, paths.output) || isContained(snapshotRoot, paths.output) {
+	if isContained(working.storage, paths.output) || isContained(snapshotRoot, paths.output) || isContained(working.storage, paths.requestedOutput) || isContained(snapshotRoot, paths.requestedOutput) {
 		return paths, failure(ErrorValidation, "output must be outside private snapshot storage", nil, "")
 	}
 	if err := validateOutput(paths.output); err != nil {
@@ -189,9 +191,9 @@ func protectSnapshotInputs(working *snapshotWorkingCopy, paths projectPaths, use
 		if !required {
 			continue
 		}
-		samePath := folderSamePath(input.path, paths.output)
+		samePath := folderSamePath(input.path, paths.output) || folderSamePath(input.path, paths.requestedOutput)
 		if input.guardOnly && input.info.IsDir() {
-			samePath = isContained(input.path, paths.output)
+			samePath = isContained(input.path, paths.output) || isContained(input.path, paths.requestedOutput)
 		}
 		if samePath || (outputInfo != nil && input.info.Mode().IsRegular() && os.SameFile(outputInfo, input.info)) {
 			return failure(ErrorValidation, "output would overwrite an original source or font input", fmt.Errorf("protected input %q", input.path), "")

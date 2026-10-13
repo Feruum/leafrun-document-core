@@ -101,3 +101,37 @@ func TestRenderSnapshotWindowsLockedOutputLeavesOldPDF(t *testing.T) {
 	}
 	requireNoRenderTemps(t, filepath.Dir(output))
 }
+func TestSnapshotWindowsExtendedOutputPreservesOriginalGuardAssociation(t *testing.T) {
+	requireRealTypst(t)
+	base := testTempDir(t)
+	guarded := filepath.Join(base, "accepted")
+	target := filepath.Join(base, "retargeted")
+	project := testTempDir(t)
+	if err := os.Mkdir(guarded, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(project, "main.typ"), "Accepted project")
+	snapshot, err := CreateSnapshot(context.Background(), &snapshotTestSource{tree: SourceTree{FS: os.DirFS(project), NativeProtection: []NativeProtection{openedProtection(t, guarded)}}}, SnapshotOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapshot.Close()
+	if err := os.Remove(guarded); err != nil {
+		t.Fatal(err)
+	}
+	makeTestDirectoryLink(t, target, guarded)
+	output := `\\?\` + filepath.Join(guarded, "result.pdf")
+	canonical := filepath.Join(target, "result.pdf")
+	writeTestFile(t, canonical, "old PDF")
+	result, err := RenderSnapshot(context.Background(), snapshot, RenderSnapshotOptions{Output: output})
+	if err == nil || result.PDFPath != "" {
+		t.Fatalf("extended requested path lost guard association: %+v %v", result, err)
+	}
+	data, err := os.ReadFile(canonical)
+	if err != nil || string(data) != "old PDF" {
+		t.Fatalf("target overwritten: %q %v", data, err)
+	}
+}

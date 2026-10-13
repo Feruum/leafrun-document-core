@@ -14,7 +14,10 @@ type projectPaths struct {
 	root   string
 	entry  string
 	output string
-	fonts  []string
+	// Snapshot publication checks retain the requested original association as
+	// well as the resolved destination, even if an original parent is retargeted.
+	requestedOutput string
+	fonts           []string
 }
 
 func preparePaths(ctx context.Context, options RenderOptions) (projectPaths, error) {

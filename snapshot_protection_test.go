@@ -120,3 +120,74 @@ func TestSnapshotLegacyProtectedFileIsAlwaysOriginalInput(t *testing.T) {
 		t.Fatalf("legacy source input overwritten: %+v %v", result, err)
 	}
 }
+func TestSnapshotGuardsPreserveOriginalOutputAssociationAfterDirectoryRetarget(t *testing.T) {
+	requireRealTypst(t)
+	for _, kind := range []string{"directory", "file", "project resource", "external font"} {
+		t.Run(kind, func(t *testing.T) {
+			base := testTempDir(t)
+			original := filepath.Join(base, "accepted")
+			target := filepath.Join(base, "replacement")
+			if err := os.Mkdir(original, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(target, 0755); err != nil {
+				t.Fatal(err)
+			}
+			logical := "resource.pdf"
+			if kind == "external font" {
+				logical = "Fira.ttf"
+			}
+			entry := "main.typ"
+			if kind == "project resource" {
+				writeTestFile(t, filepath.Join(original, entry), "#read(\"resource.pdf\")")
+			}
+			input := filepath.Join(original, logical)
+			writeTestFile(t, input, "accepted input")
+			output := filepath.Join(original, logical)
+			if kind == "directory" {
+				output = filepath.Join(original, "nested/result.pdf")
+			}
+			source := &snapshotTestSource{tree: SourceTree{FS: fstest.MapFS{"main.typ": &fstest.MapFile{Data: []byte("Accepted frozen bytes")}}}}
+			options := SnapshotOptions{}
+			var provider ProjectSource = source
+			switch kind {
+			case "directory":
+				source.tree.NativeProtection = []NativeProtection{openedProtection(t, original)}
+			case "file":
+				source.tree.NativeProtection = []NativeProtection{openedProtection(t, input)}
+			case "project resource":
+				provider = FolderSource{Root: original}
+			case "external font":
+				options.FontPaths = []string{original}
+			}
+			snapshot, err := CreateSnapshot(context.Background(), provider, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer snapshot.Close()
+			if err := os.RemoveAll(original); err != nil {
+				t.Fatal(err)
+			}
+			makeTestDirectoryLink(t, target, original)
+			canonicalOutput := filepath.Join(target, logical)
+			if kind == "directory" {
+				canonicalOutput = filepath.Join(target, "nested/result.pdf")
+			}
+			writeTestFile(t, canonicalOutput, "previous target PDF")
+			result, err := RenderSnapshot(context.Background(), snapshot, RenderSnapshotOptions{Output: output})
+			if err == nil || result.PDFPath != "" {
+				t.Fatalf("retargeted original %s association published: %+v %v", kind, result, err)
+			}
+			data, err := os.ReadFile(canonicalOutput)
+			if err != nil || string(data) != "previous target PDF" {
+				t.Fatalf("retargeted output changed: %q %v", data, err)
+			}
+			requireNoRenderTemps(t, filepath.Dir(canonicalOutput))
+			result, err = RenderSnapshot(context.Background(), snapshot, RenderSnapshotOptions{Output: filepath.Join(testTempDir(t), "allowed.pdf")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			requirePDF(t, result.PDFPath)
+		})
+	}
+}
