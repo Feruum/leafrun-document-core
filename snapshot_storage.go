@@ -17,6 +17,7 @@ type snapshotOpenFile struct {
 	snapshot *Snapshot
 	file     *os.File
 	name     string
+	info     map[string]snapshotFileInfo
 	closed   bool
 }
 
@@ -30,18 +31,18 @@ func (view snapshotView) Open(name string) (fs.File, error) {
 	if !validSnapshotPath(name) {
 		return nil, snapshotFSError("open", name, fs.ErrInvalid)
 	}
-	if _, exists := snapshot.fsInfo[name]; !exists {
+	if _, exists := view.info[name]; !exists {
 		return nil, snapshotFSError("open", name, fs.ErrNotExist)
 	}
 	localized, err := filepath.Localize(name)
 	if err != nil {
 		return nil, snapshotFSError("open", name, err)
 	}
-	file, err := os.Open(filepath.Join(snapshot.root, "project", localized))
+	file, err := os.Open(filepath.Join(snapshot.root, view.storage, localized))
 	if err != nil {
 		return nil, snapshotFSError("open", name, err)
 	}
-	opened := &snapshotOpenFile{snapshot: snapshot, file: file, name: name}
+	opened := &snapshotOpenFile{snapshot: snapshot, file: file, name: name, info: view.info}
 	snapshot.files[opened] = struct{}{}
 	return opened, nil
 }
@@ -75,7 +76,7 @@ func (file *snapshotOpenFile) Stat() (fs.FileInfo, error) {
 	if err := file.operationError("stat"); err != nil {
 		return nil, err
 	}
-	info, ok := file.snapshot.fsInfo[file.name]
+	info, ok := file.info[file.name]
 	if !ok {
 		return nil, snapshotFSError("stat", file.name, fs.ErrNotExist)
 	}
@@ -91,7 +92,7 @@ func (file *snapshotOpenFile) ReadDir(n int) ([]fs.DirEntry, error) {
 	entries, readErr := file.file.ReadDir(n)
 	public := make([]fs.DirEntry, 0, len(entries))
 	for _, entry := range entries {
-		info, ok := file.snapshot.fsInfo[path.Join(file.name, entry.Name())]
+		info, ok := file.info[path.Join(file.name, entry.Name())]
 		if !ok {
 			return public, snapshotFSError("readdir", file.name, fs.ErrNotExist)
 		}

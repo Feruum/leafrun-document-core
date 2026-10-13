@@ -29,6 +29,10 @@ func invoiceFixture(t *testing.T) string {
 		if err != nil {
 			return err
 		}
+		// A previous example CLI render must not become an archived source input.
+		if relative == "output" && entry.IsDir() {
+			return filepath.SkipDir
+		}
 		destination := filepath.Join(root, relative)
 		if entry.IsDir() {
 			return os.MkdirAll(destination, 0755)
@@ -43,6 +47,43 @@ func invoiceFixture(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func TestInvoiceFixtureOmitsOnlyGeneratedRootOutput(t *testing.T) {
+	workspace := t.TempDir()
+	source := filepath.Join(workspace, "examples", "invoice")
+	for name, data := range map[string]string{
+		"main.typ":                   "Invoice source",
+		"output/result.pdf":          "%PDF-generated example result",
+		"resources/output/data.json": `{"input":true}`,
+	} {
+		filename := filepath.Join(source, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filename, []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workingDirectory := filepath.Join(workspace, "cmd", "leafrun")
+	if err := os.MkdirAll(workingDirectory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workingDirectory)
+	fixture := invoiceFixture(t)
+	if _, err := os.Stat(filepath.Join(fixture, "output")); !os.IsNotExist(err) {
+		t.Fatalf("generated root output copied into source fixture: %v", err)
+	}
+	for _, name := range []string{"main.typ", "resources/output/data.json"} {
+		original, err := os.ReadFile(filepath.Join(source, filepath.FromSlash(name)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		copied, err := os.ReadFile(filepath.Join(fixture, filepath.FromSlash(name)))
+		if err != nil || !bytes.Equal(original, copied) {
+			t.Fatalf("source resource %q changed: %q, %v", name, copied, err)
+		}
+	}
 }
 
 func archiveInvoice(t *testing.T, root string, tarGZ bool) string {

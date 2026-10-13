@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 )
 
@@ -216,7 +219,33 @@ func (s *Snapshot) Manifest() SnapshotManifest {
 
 // FS returns a read-only project filesystem. All operations reject a closed
 // snapshot; files opened before Close are also closed by Close.
-func (s *Snapshot) FS() fs.FS { return snapshotView{s} }
+func (s *Snapshot) FS() fs.FS { return snapshotView{snapshot: s, storage: "project", info: s.fsInfo} }
+
+// FontFS borrows the captured font tree at its Manifest.Fonts index. Names are
+// relative to that font directory. The view and all its open readers become
+// unusable when the snapshot closes; SourcePath is never opened.
+func (s *Snapshot) FontFS(index int) (fs.FS, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.root == "" {
+		return nil, snapshotFSError("fontfs", strconv.Itoa(index), ErrSnapshotClosed)
+	}
+	if index < 0 || index >= len(s.manifest.Fonts) {
+		return nil, snapshotFSError("fontfs", strconv.Itoa(index), fs.ErrInvalid)
+	}
+	font := s.manifest.Fonts[index]
+	storage := filepath.Join("fonts", strconv.Itoa(index))
+	info := snapshotReadInfo(manifestSnapshotScan(font.Files, font.Directories))
+	if font.InProject {
+		storage = filepath.Join("project", filepath.FromSlash(font.Path))
+		for name := range info {
+			captured := s.fsInfo[path.Join(font.Path, name)]
+			captured.name = path.Base(name)
+			info[name] = captured
+		}
+	}
+	return snapshotView{snapshot: s, storage: storage, info: info}, nil
+}
 
 // Close releases private storage once and returns the same cleanup result on
 // subsequent calls. It is safe concurrently with filesystem operations.
@@ -245,7 +274,11 @@ func (s *Snapshot) Close() error {
 	return s.closeErr
 }
 
-type snapshotView struct{ snapshot *Snapshot }
+type snapshotView struct {
+	snapshot *Snapshot
+	storage  string
+	info     map[string]snapshotFileInfo
+}
 
 type snapshotInput struct {
 	path, projectPath string

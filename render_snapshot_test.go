@@ -24,6 +24,15 @@ func TestRenderSnapshotUsesAcceptedBytesAndBorrowsSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer snapshot.Close()
+	// Keep the source inodes allocated after their original paths disappear.
+	// Otherwise Linux can reuse one for the first PDF, whose native identity the
+	// hardlink guard cannot distinguish from the deleted input on the next render.
+	retained := testTempDir(t)
+	for _, name := range []string{"nested/main.typ", "nested/body.typ", "data.json"} {
+		if err := os.Link(filepath.Join(project, filepath.FromSlash(name)), filepath.Join(retained, filepath.Base(name))); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.RemoveAll(project); err != nil {
 		t.Fatal(err)
 	}
