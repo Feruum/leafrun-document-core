@@ -10,7 +10,7 @@ The integrations module supplies independent `io/fs` trees and source metadata. 
 
 ## Implemented capture contract
 
-`ProjectSource.Open(context.Context)` returns `SourceTree`: an `fs.FS` rooted at `.`, `SourceOrigin`, a release callback and original native `ProtectedPaths`. `CreateSnapshot` opens the source once and releases its owned resources before returning, including acquisition failures that provide a release callback. It never retries a changing source.
+`ProjectSource.Open(context.Context)` returns `SourceTree`: an `fs.FS` rooted at `.`, `SourceOrigin`, a release callback and original native publication metadata. `ProtectedPaths` supports native input mirrors; eager `NativeProtection` values retain accepted original identities independently of exported content. `CreateSnapshot` opens the source once and releases its owned resources before returning, including acquisition failures that provide a release callback. It never retries a changing source.
 
 `Snapshot.Manifest()` returns a deep copy. `Snapshot.FS()` exposes read-only logical paths and no native storage path; `Close` is idempotent. Internal compiler working copies have an independent lifetime. Capture errors expose their stage and preserve their cause through `Unwrap`; `ErrSourceChanged`, `ErrSnapshotClosed` and `ErrSnapshotLimit` can be checked with `errors.Is`.
 
@@ -50,6 +50,20 @@ CI runs native Linux, Windows and macOS with Go 1.27.0, Typst 0.15.1, Git and Op
 
 Development and CI use a transient Go workspace with exact feature commits. Do not ship `go.work` or local `replace` directives. After review, release integrations `v0.1.0` first, pin that version in core and verify with `GOWORK=off`.
 
+Until that release, the external workspace uses a version-specific replacement for the planned integrations `v0.1.0` dependency, pointing at the checked-out feature. Compatibility testing similarly maps Generation's core `v0.1.0` requirement to the exact core feature. These temporary work-file entries let Go load graph metadata without an unpublished tag or a fabricated module-cache entry. They are not module replacements and are not delivered in either repository.
+
 Keep own `feature/` branches and prepare related draft pull requests into `develop`. If upstream `develop` is missing, retain the feature branches; do not merge or release. Keep Linear tasks In Progress until their delivery and acceptance criteria are met. All repository text, commits and pull requests use English.
 
 Folder consistency is optimistic verification, not an atomic filesystem snapshot. Accepted inputs are immutable; system fonts, the entire environment and PDF determinism are outside this milestone. S3, jobs, OAuth, synchronization, editors and document quality evaluation remain later work.
+
+## Shared render API and ownership
+
+`RenderSnapshot(ctx, snapshot, RenderSnapshotOptions)` borrows an accepted snapshot. Its logical `Entrypoint` defaults to `main.typ`; required `Output` resolves from the caller's working directory. Fonts and their search order come exclusively from the snapshot. Each render prepares an independent working copy, so closing the accepted snapshot cannot remove already prepared compiler inputs.
+
+`RenderSource(ctx, source, RenderSourceOptions)` manages capture and rendering together. Options add ordered `FontPaths`, `TempDir` and `SnapshotLimits` to the same entrypoint/output rules. It owns the resulting snapshot. Required working-copy, dependency-stage and owned-snapshot cleanup precedes atomic publication; any mandatory cleanup failure preserves the previous PDF. The existing live `Render` API retains its M01 path and default behavior.
+
+The CLI maps native local entry/output/font paths into these contracts. Archives and Git select their root in the provider before capture. Provider metadata is explicitly bridged in `cmd/leafrun`; the integrations module does not depend on core.
+
+Eager native guard directories protect the original complete directory prefix. Their files and ordinary file identities also protect hardlink aliases after removal or replacement. They do not require Git working data or metadata to mirror the accepted commit. When an eager archive guard and `ProtectedPaths` describe the same input, the accepted identity takes precedence over a later reopened pathname. None of these guards enter the manifest or content digest.
+
+Only structured diagnostic positions and trace paths become snapshot-relative. Raw engine output and raw diagnostic text remain unchanged; lines, columns, nullable positions, hints and trace order are retained.

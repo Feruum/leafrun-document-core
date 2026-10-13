@@ -11,24 +11,67 @@ jobs:
   test:
     name: Go and Typst (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          path: core
+          persist-credentials: false
+      - name: Checkout exact M02 adapters
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: Feruum/leafrun-integrations
+          ref: a4414f5fe3f12815d305d14edba5396a97e5738b
+          path: integrations
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: '1.27.0'
           cache: false
       - name: Install pinned Typst
         shell: pwsh
-        run: ./scripts/install-typst.ps1
+        run: ./core/scripts/install-typst.ps1
+      - name: Check mandatory native tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-Command git -ErrorAction Stop | Out-Null
+          Get-Command ssh -ErrorAction Stop | Out-Null
+          git --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ssh -V
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          typst --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Create temporary paired workspace
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workspaceDirectory = Join-Path $env:RUNNER_TEMP ('leafrun-m02-' + [Guid]::NewGuid().ToString('N'))
+          [System.IO.Directory]::CreateDirectory($workspaceDirectory) | Out-Null
+          Push-Location -LiteralPath $workspaceDirectory
+          try {
+            $coreCheckout = Join-Path $env:GITHUB_WORKSPACE 'core'
+            $integrationsCheckout = Join-Path $env:GITHUB_WORKSPACE 'integrations'
+            go work init $coreCheckout $integrationsCheckout
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            go work edit "-replace=github.com/leafrun/leafrun-integrations@v0.1.0=$integrationsCheckout"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $workspaceFile = Join-Path $workspaceDirectory 'go.work'
+            'GOWORK=' + $workspaceFile | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } finally {
+            Pop-Location
+          }
       - name: Test real renderer and CLI
+        working-directory: core
         shell: pwsh
         run: |
           $testLog = Join-Path $env:RUNNER_TEMP 'leafrun-test.log'
-          go test ./... -count=1 -v 2>&1 | Tee-Object -FilePath $testLog
+          go test ./... -count=1 -v -timeout=5m 2>&1 | Tee-Object -FilePath $testLog
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0) {
             @('### Go test failure', '', '```text') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
@@ -37,11 +80,21 @@ jobs:
           }
           exit $testExit
       - name: Vet
+        working-directory: core
         run: go vet ./...
       - name: Build CLI
+        working-directory: core
         run: go build ./cmd/leafrun
-      - name: Render bundled invoice
-        run: go run ./cmd/leafrun render --project ./examples/invoice
+      - name: Demonstrate all sources and preserved output
+        working-directory: core
+        shell: pwsh
+        run: |
+          $demoDirectory = Join-Path $env:RUNNER_TEMP ('leafrun-source-demo-' + [Guid]::NewGuid().ToString('N'))
+          ./scripts/verify-sources.ps1 -CoreDirectory . -ArtifactDirectory $demoDirectory
+          @('### M02 source demonstration', '', '```json') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Get-Content -LiteralPath (Join-Path $demoDirectory 'evidence.json') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          '```' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
       - name: Race detector
+        working-directory: core
         if: runner.os == 'Linux'
-        run: go test -race ./... -count=1
+        run: go test -race ./... -count=1 -timeout=5m
