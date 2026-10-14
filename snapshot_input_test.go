@@ -166,7 +166,11 @@ func TestCreateInputSnapshotAddsExactInputAndOwnsCapturedTrees(t *testing.T) {
 	if _, err := fs.ReadFile(base.FS(), "input.json"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("base gained input.json: %v", err)
 	}
-	if relative, err := filepath.Rel(derivedTemp, derived.root); err != nil || relative == ".." || filepath.IsAbs(relative) || len(relative) >= 3 && relative[:3] == ".."+string(filepath.Separator) {
+	physicalTemp, err := canonicalDirectory(derivedTemp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relative, err := filepath.Rel(physicalTemp, derived.root); err != nil || relative == ".." || filepath.IsAbs(relative) || len(relative) >= 3 && relative[:3] == ".."+string(filepath.Separator) {
 		t.Fatalf("derived storage escaped TempDir: %q, %v", relative, err)
 	}
 	if err := base.Close(); err != nil {
