@@ -154,8 +154,11 @@ type Snapshot struct {
 	cleanup  func(string) error
 	files    map[*snapshotOpenFile]struct{}
 	inputs   []snapshotInput
-	limits   SnapshotLimits
-	fsInfo   map[string]snapshotFileInfo
+	// Native directories actually acquired at capture, never manifest metadata.
+	// Retained without reopening them when deriving an independent snapshot.
+	protectedDirectories []string
+	limits               SnapshotLimits
+	fsInfo               map[string]snapshotFileInfo
 }
 
 // CreateSnapshot opens source once and releases it before returning. It does

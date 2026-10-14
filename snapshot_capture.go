@@ -139,8 +139,14 @@ func captureSnapshot(ctx context.Context, source SourceTree, options SnapshotOpt
 	if err != nil {
 		return nil, snapshotFailure(SnapshotStageValidate, "native protection", err)
 	}
-	if err := rejectSnapshotStorage(tempDir, protected, trees); err != nil {
+	protectedDirectories, err := snapshotStorageDirectories(tempDir, protected, trees)
+	if err != nil {
 		return nil, snapshotFailure(SnapshotStageValidate, "", err)
+	}
+	for _, guard := range guardInputs {
+		if guard.info.IsDir() {
+			protectedDirectories = append(protectedDirectories, guard.path)
+		}
 	}
 	inputs, err := retainSnapshotInputs(ctx, protected, project, false)
 	if err != nil {
@@ -213,7 +219,7 @@ func captureSnapshot(ctx context.Context, source SourceTree, options SnapshotOpt
 	if manifest.Origin.Kind == "folder" {
 		manifest.Origin.Revision = manifest.ID
 	}
-	return &Snapshot{root: root, tempDir: tempDir, manifest: manifest, cleanup: os.RemoveAll, files: make(map[*snapshotOpenFile]struct{}), inputs: inputs, limits: limits, fsInfo: snapshotReadInfo(project)}, nil
+	return &Snapshot{root: root, tempDir: tempDir, manifest: manifest, cleanup: os.RemoveAll, files: make(map[*snapshotOpenFile]struct{}), inputs: inputs, protectedDirectories: protectedDirectories, limits: limits, fsInfo: snapshotReadInfo(project)}, nil
 }
 
 func snapshotReadInfo(scan snapshotScan) map[string]snapshotFileInfo {

@@ -134,12 +134,17 @@ func (native *snapshotNativeFS) ReadDir(name string) (entries []fs.DirEntry, err
 }
 
 func rejectSnapshotStorage(tempDir string, protected []string, trees []snapshotCaptureTree) error {
+	_, err := snapshotStorageDirectories(tempDir, protected, trees)
+	return err
+}
+
+func snapshotStorageDirectories(tempDir string, protected []string, trees []snapshotCaptureTree) ([]string, error) {
 	if tempDir == "" {
 		tempDir = os.TempDir()
 	}
 	absolute, err := canonicalDirectory(tempDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	roots := append([]string(nil), protected...)
 	for _, tree := range trees {
@@ -147,23 +152,25 @@ func rejectSnapshotStorage(tempDir string, protected []string, trees []snapshotC
 			roots = append(roots, tree.nativeRoot)
 		}
 	}
+	directories := []string{}
 	for _, root := range roots {
 		info, err := os.Stat(root)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !info.IsDir() {
 			continue
 		}
 		root, err = canonicalDirectory(root)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if isContained(root, absolute) {
-			return fmt.Errorf("snapshot temporary storage must be outside input directory %q", root)
+			return nil, fmt.Errorf("snapshot temporary storage must be outside input directory %q", root)
 		}
+		directories = append(directories, root)
 	}
-	return nil
+	return directories, nil
 }
 
 func retainSnapshotInputs(ctx context.Context, protected []string, scan snapshotScan, font bool) (inputs []snapshotInput, err error) {
