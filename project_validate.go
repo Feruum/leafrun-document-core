@@ -112,6 +112,13 @@ func validProjectLogicalPath(value string) bool {
 }
 
 func validateProject(ctx context.Context, files fs.FS, manifest ProjectManifest) error {
+	// Check the root itself so files, implicit/nonempty directories and empty
+	// directories all fail before a source can become an immutable release.
+	if _, err := fs.Stat(files, ".leafrun-input"); err == nil {
+		return projectError(".leafrun-input", "", "reserved_input_root", "source project owns the reserved .leafrun-input root")
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return projectError(".leafrun-input", "", "resource_unavailable", "reserved input root ownership cannot be checked")
+	}
 	if manifest.FormatVersion != ProjectFormatVersion {
 		return projectError(ProjectManifestFile, "/formatVersion", "unsupported_version", "only project format version 1 is supported")
 	}

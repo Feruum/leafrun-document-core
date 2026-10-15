@@ -18,10 +18,11 @@ const projectSchemaResourceLimit int64 = 4 << 20
 const projectDraft2020Schema = "https://json-schema.org/draft/2020-12/schema"
 
 type projectSchemaLoader struct {
-	ctx       context.Context
-	files     fs.FS
-	resources map[string]any
-	total     int64
+	ctx          context.Context
+	files        fs.FS
+	resources    map[string]any
+	rawResources map[string][]byte
+	total        int64
 }
 
 type projectSchemaValidator struct {
@@ -44,7 +45,7 @@ func validateProjectSchema(ctx context.Context, files fs.FS, schemaPath string) 
 }
 
 func newProjectSchemaValidator(ctx context.Context, files fs.FS) *projectSchemaValidator {
-	loader := &projectSchemaLoader{ctx: ctx, files: files, resources: make(map[string]any)}
+	loader := &projectSchemaLoader{ctx: ctx, files: files, resources: make(map[string]any), rawResources: make(map[string][]byte)}
 	compiler := jsonschema.NewCompiler()
 	compiler.DefaultDraft(jsonschema.Draft2020)
 	compiler.UseLoader(loader)
@@ -144,6 +145,9 @@ func (l *projectSchemaLoader) Load(location string) (any, error) {
 	}
 	l.total += int64(len(data))
 	l.resources[name] = value
+	// Retain the exact bytes that passed validation within the aggregate budget.
+	// Re-reading could observe changed files; re-encoding could expand strings.
+	l.rawResources[name] = data
 	return value, l.ctx.Err()
 }
 

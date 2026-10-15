@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -45,5 +46,35 @@ func TestSchemaResourcesUsesTechnicalDefaultValidation(t *testing.T) {
 	var diagnostic *ProjectValidationError
 	if !errors.As(err, &diagnostic) || diagnostic.Code != "invalid_default" {
 		t.Fatalf("SchemaResources() error = %v, want invalid_default diagnostic", err)
+	}
+}
+
+func TestSchemaResourcesPreservesValidatedBytesWithinClosureBudget(t *testing.T) {
+	// Include HTML-sensitive characters, JavaScript line separators and numeric
+	// lexemes. Re-encoding decoded values must not inflate the closure's budget.
+	root := []byte(` { "type":"object", "description":"` + strings.Repeat("<>&\u2028\u2029", 80000) + `", "properties":{"amount":{"$ref":"common.json"}} } `)
+	common := []byte(" {\n\"type\":\"number\",\"default\":1.2300e+04,\"description\":\"" + strings.Repeat("<>&", 100000) + "\"\n} ")
+	files := fstest.MapFS{"schema.json": &fstest.MapFile{Data: root}, "common.json": &fstest.MapFile{Data: common}}
+	if int64(len(root)+len(common)) > projectSchemaResourceLimit {
+		t.Fatal("fixture exceeds source closure budget")
+	}
+	resources, err := SchemaResources(context.Background(), files, "schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string][]byte{"schema.json": root, "common.json": common} {
+		if !bytes.Equal(resources[name], source) {
+			t.Errorf("%s changed: source %d bytes, returned %d bytes", name, len(source), len(resources[name]))
+		}
+	}
+	resources["schema.json"][1] = '['
+	if !json.Valid(root) {
+		t.Fatal("returned resource aliases source bytes")
+	}
+	// The same aggregate limit must still reject a referenced resource beyond it.
+	files["common.json"] = &fstest.MapFile{Data: []byte(`{"type":"number","description":"` + strings.Repeat("x", int(projectSchemaResourceLimit)-len(root)) + `"}`)}
+	_, err = SchemaResources(context.Background(), files, "schema.json")
+	if err == nil || !strings.Contains(err.Error(), "schema_resource_limit") {
+		t.Fatalf("aggregate schema budget was not enforced: %v", err)
 	}
 }

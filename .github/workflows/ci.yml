@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: Feruum/leafrun-contracts
-          ref: 5fc1570d770ab680a639bc5a93ff0ba0946b4d9a
+          ref: de87e4fc3a339d139155112f17357fdb0aaa7845
           path: contracts
           persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6

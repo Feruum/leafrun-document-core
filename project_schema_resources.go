@@ -1,16 +1,16 @@
 package documentcore
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io/fs"
 )
 
 // SchemaResources returns the validated schema closure rooted at schemaPath.
 // The map contains only logical schema resource paths reachable through
 // snapshot-local references. Returned messages are independent copies and
-// retain exact json.Number lexemes.
+// retain the exact validated bytes, including numeric lexemes and string escapes.
 func SchemaResources(ctx context.Context, files fs.FS, schemaPath string) (map[string]json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -35,11 +35,7 @@ func SchemaResources(ctx context.Context, files fs.FS, schemaPath string) (map[s
 				return nil, projectError(name, "", "invalid_schema", "schema resource must be an object or boolean")
 			}
 		}
-		data, err := json.Marshal(value)
-		if err != nil {
-			return nil, errors.Join(projectError(name, "", "invalid_schema", "schema resource cannot be serialized"), err)
-		}
-		resources[name] = json.RawMessage(data)
+		resources[name] = json.RawMessage(bytes.Clone(validator.loader.rawResources[name]))
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
