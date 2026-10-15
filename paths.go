@@ -18,6 +18,8 @@ type projectPaths struct {
 	// well as the resolved destination, even if an original parent is retargeted.
 	requestedOutput string
 	fonts           []string
+	inputs          map[string]string
+	pdfStandard     string
 }
 
 func preparePaths(ctx context.Context, options RenderOptions) (projectPaths, error) {

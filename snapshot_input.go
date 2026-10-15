@@ -26,6 +26,10 @@ type CreateInputSnapshotOptions struct {
 // at the project root. The input bytes are copied exactly as provided. The base
 // snapshot remains open and unchanged; the returned snapshot owns its storage.
 func CreateInputSnapshot(ctx context.Context, base *Snapshot, input []byte, options CreateInputSnapshotOptions) (*Snapshot, error) {
+	return createInputOverlaySnapshot(ctx, base, map[string][]byte{"input.json": bytes.Clone(input)}, options)
+}
+
+func createInputOverlaySnapshot(ctx context.Context, base *Snapshot, overlayFiles map[string][]byte, options CreateInputSnapshotOptions) (*Snapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, snapshotFailure(SnapshotStageAcquire, "", err)
 	}
@@ -36,9 +40,16 @@ func CreateInputSnapshot(ctx context.Context, base *Snapshot, input []byte, opti
 	if err != nil {
 		return nil, snapshotFailure(SnapshotStageValidate, "", err)
 	}
-	inputSize := int64(len(input))
-	if inputSize > limits.MaxFileBytes || inputSize > limits.MaxTotalBytes {
-		return nil, snapshotFailure(SnapshotStageValidate, "input.json", ErrSnapshotLimit)
+	if len(overlayFiles) == 0 {
+		return nil, snapshotFailure(SnapshotStageValidate, "", errors.New("at least one input overlay file is required"))
+	}
+	for name, data := range overlayFiles {
+		if !validSnapshotPath(name) || name == "." {
+			return nil, snapshotFailure(SnapshotStageValidate, name, errors.New("input overlay path must be a logical snapshot file"))
+		}
+		if int64(len(data)) > limits.MaxFileBytes || int64(len(data)) > limits.MaxTotalBytes {
+			return nil, snapshotFailure(SnapshotStageValidate, name, ErrSnapshotLimit)
+		}
 	}
 
 	manifest := base.Manifest()
@@ -65,30 +76,40 @@ func CreateInputSnapshot(ctx context.Context, base *Snapshot, input []byte, opti
 		}
 	}
 
-	if hasSnapshotDir(manifestSnapshotScan(manifest.Files, manifest.Directories), "input.json") {
-		return nil, snapshotFailure(SnapshotStageValidate, "input.json", errors.New("input.json collides with a project directory"))
-	}
-
-	data := bytes.Clone(input)
-	inputHash := sha256.Sum256(data)
-	inputFile := SnapshotFile{Path: "input.json", Size: inputSize, SHA256: hex.EncodeToString(inputHash[:])}
-	files := make([]SnapshotFile, 0, len(manifest.Files)+1)
-	found := false
+	baseScan := manifestSnapshotScan(manifest.Files, manifest.Directories)
+	manifestFilesByPath := make(map[string]SnapshotFile, len(manifest.Files)+len(overlayFiles))
 	for _, file := range manifest.Files {
-		if file.Path == inputFile.Path {
-			if !found {
-				files = append(files, inputFile)
-				found = true
-			}
-			continue
+		manifestFilesByPath[file.Path] = file
+	}
+	directorySet := make(map[string]bool, len(manifest.Directories)+len(overlayFiles))
+	for _, directory := range manifest.Directories {
+		directorySet[directory] = true
+	}
+	for name, data := range overlayFiles {
+		if hasSnapshotDir(baseScan, name) {
+			return nil, snapshotFailure(SnapshotStageValidate, name, errors.New("input overlay file collides with a project directory"))
 		}
+		for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
+			if _, exists := manifestFilesByPath[parent]; exists {
+				return nil, snapshotFailure(SnapshotStageValidate, parent, errors.New("input overlay directory collides with a project file"))
+			}
+			directorySet[parent] = true
+		}
+		inputHash := sha256.Sum256(data)
+		manifestFilesByPath[name] = SnapshotFile{Path: name, Size: int64(len(data)), SHA256: hex.EncodeToString(inputHash[:])}
+	}
+	files := make([]SnapshotFile, 0, len(manifestFilesByPath))
+	for _, file := range manifestFilesByPath {
 		files = append(files, file)
 	}
-	if !found {
-		files = append(files, inputFile)
-	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	directories := make([]string, 0, len(directorySet))
+	for directory := range directorySet {
+		directories = append(directories, directory)
+	}
+	sort.Strings(directories)
 	manifest.Files = files
+	manifest.Directories = directories
 
 	project := manifestSnapshotScan(manifest.Files, manifest.Directories)
 	for index := range manifest.Fonts {
@@ -119,7 +140,7 @@ func CreateInputSnapshot(ctx context.Context, base *Snapshot, input []byte, opti
 	}
 	bundle := SnapshotBundle{
 		Manifest:       manifest,
-		ProjectFS:      snapshotInputOverlayFS{base: base.FS(), data: data},
+		ProjectFS:      newSnapshotInputOverlayFS(base.FS(), overlayFiles),
 		ExternalFontFS: externalFonts,
 	}
 	snapshot, err := RestoreSnapshot(ctx, bundle, RestoreSnapshotOptions{TempDir: tempDir, Limits: options.Limits})
@@ -132,40 +153,76 @@ func CreateInputSnapshot(ctx context.Context, base *Snapshot, input []byte, opti
 }
 
 type snapshotInputOverlayFS struct {
-	base fs.FS
-	data []byte
+	base        fs.FS
+	files       map[string][]byte
+	directories map[string]bool
+}
+
+func newSnapshotInputOverlayFS(base fs.FS, files map[string][]byte) snapshotInputOverlayFS {
+	clonedFiles := make(map[string][]byte, len(files))
+	directories := map[string]bool{".": true}
+	for name, data := range files {
+		clonedFiles[name] = bytes.Clone(data)
+		for parent := path.Dir(name); ; parent = path.Dir(parent) {
+			directories[parent] = true
+			if parent == "." {
+				break
+			}
+		}
+	}
+	return snapshotInputOverlayFS{base: base, files: clonedFiles, directories: directories}
 }
 
 func (overlay snapshotInputOverlayFS) Open(name string) (fs.File, error) {
-	if name == "input.json" {
-		info := snapshotFileInfo{name: name, size: int64(len(overlay.data)), mode: 0o444}
-		return &snapshotInputOverlayFile{reader: bytes.NewReader(overlay.data), info: info}, nil
+	if data, exists := overlay.files[name]; exists {
+		info := snapshotFileInfo{name: path.Base(name), size: int64(len(data)), mode: 0o444}
+		return &snapshotInputOverlayFile{reader: bytes.NewReader(data), info: info}, nil
 	}
 	return overlay.base.Open(name)
 }
 
 func (overlay snapshotInputOverlayFS) Stat(name string) (fs.FileInfo, error) {
-	if name == "input.json" {
-		return snapshotFileInfo{name: name, size: int64(len(overlay.data)), mode: 0o444}, nil
+	if data, exists := overlay.files[name]; exists {
+		return snapshotFileInfo{name: path.Base(name), size: int64(len(data)), mode: 0o444}, nil
+	}
+	if overlay.directories[name] {
+		return snapshotFileInfo{name: path.Base(name), mode: fs.ModeDir | 0o555}, nil
 	}
 	return fs.Stat(overlay.base, name)
 }
 
 func (overlay snapshotInputOverlayFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	entries, err := fs.ReadDir(overlay.base, name)
-	if err != nil || name != "." {
-		return entries, err
+	if err != nil && !overlay.directories[name] {
+		return nil, err
 	}
-	rootEntries := make([]fs.DirEntry, 0, len(entries)+1)
+	if err != nil {
+		entries = nil
+	}
+	merged := make(map[string]fs.DirEntry, len(entries)+len(overlay.files))
 	for _, entry := range entries {
-		if entry.Name() != "input.json" {
-			rootEntries = append(rootEntries, entry)
-		}
+		merged[entry.Name()] = entry
 	}
-	info := snapshotFileInfo{name: "input.json", size: int64(len(overlay.data)), mode: 0o444}
-	rootEntries = append(rootEntries, snapshotDirEntry{info: info})
-	sort.Slice(rootEntries, func(i, j int) bool { return rootEntries[i].Name() < rootEntries[j].Name() })
-	return rootEntries, nil
+	for directory := range overlay.directories {
+		if directory == "." || path.Dir(directory) != name {
+			continue
+		}
+		info := snapshotFileInfo{name: path.Base(directory), mode: fs.ModeDir | 0o555}
+		merged[info.name] = snapshotDirEntry{info: info}
+	}
+	for filePath, data := range overlay.files {
+		if path.Dir(filePath) != name {
+			continue
+		}
+		info := snapshotFileInfo{name: path.Base(filePath), size: int64(len(data)), mode: 0o444}
+		merged[info.name] = snapshotDirEntry{info: info}
+	}
+	result := make([]fs.DirEntry, 0, len(merged))
+	for _, entry := range merged {
+		result = append(result, entry)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name() < result[j].Name() })
+	return result, nil
 }
 
 type snapshotInputOverlayFile struct {

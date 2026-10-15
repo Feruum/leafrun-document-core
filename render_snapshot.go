@@ -14,8 +14,10 @@ import (
 // against the caller's current working directory, never private snapshot storage.
 // Fonts and their search order come exclusively from the accepted snapshot.
 type RenderSnapshotOptions struct {
-	Entrypoint string `json:"entrypoint"`
-	Output     string `json:"output"`
+	Entrypoint  string            `json:"entrypoint"`
+	Output      string            `json:"output"`
+	Inputs      map[string]string `json:"inputs,omitempty"`
+	PDFStandard string            `json:"pdfStandard,omitempty"`
 }
 
 // RenderSourceOptions selects capture inputs and a published PDF. Entrypoint is
@@ -105,6 +107,12 @@ func prepareSnapshotPaths(ctx context.Context, working *snapshotWorkingCopy, sna
 	if err := ctx.Err(); err != nil {
 		return paths, canceled(ctx, err, "")
 	}
+	inputs, pdfStandard, err := validateSnapshotRenderOptions(options)
+	if err != nil {
+		return paths, err
+	}
+	paths.inputs = inputs
+	paths.pdfStandard = pdfStandard
 	entry := options.Entrypoint
 	if entry == "" {
 		entry = "main.typ"
@@ -143,6 +151,20 @@ func prepareSnapshotPaths(ctx context.Context, working *snapshotWorkingCopy, sna
 		return paths, err
 	}
 	return paths, nil
+}
+
+func validateSnapshotRenderOptions(options RenderSnapshotOptions) (map[string]string, string, error) {
+	inputs := make(map[string]string, len(options.Inputs))
+	for key, value := range options.Inputs {
+		inputs[key] = value
+	}
+	if err := validateTypstInputs(inputs, false); err != nil {
+		return nil, "", failure(ErrorValidation, err.Error(), nil, "")
+	}
+	if options.PDFStandard != "" && !validPDFStandardList(options.PDFStandard) {
+		return nil, "", failure(ErrorValidation, "PDF standard is not supported by Typst 0.15.1", nil, "")
+	}
+	return inputs, options.PDFStandard, nil
 }
 
 func validateOutput(output string) error {

@@ -28,6 +28,13 @@ jobs:
           ref: a4414f5fe3f12815d305d14edba5396a97e5738b
           path: integrations
           persist-credentials: false
+      - name: Checkout exact E05 Contracts
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: Feruum/leafrun-contracts
+          ref: 5fc1570d770ab680a639bc5a93ff0ba0946b4d9a
+          path: contracts
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: '1.27.0'
@@ -57,9 +64,12 @@ jobs:
           try {
             $coreCheckout = Join-Path $env:GITHUB_WORKSPACE 'core'
             $integrationsCheckout = Join-Path $env:GITHUB_WORKSPACE 'integrations'
-            go work init $coreCheckout $integrationsCheckout
+            $contractsCheckout = Join-Path $env:GITHUB_WORKSPACE 'contracts'
+            go work init $coreCheckout $integrationsCheckout $contractsCheckout
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             go work edit "-replace=github.com/leafrun/leafrun-integrations@v0.1.0=$integrationsCheckout"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            go work edit "-replace=github.com/leafrun/leafrun-contracts@v0.1.0=$contractsCheckout"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $workspaceFile = Join-Path $workspaceDirectory 'go.work'
             'GOWORK=' + $workspaceFile | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

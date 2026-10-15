@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Данные продажи",
+  "type": "object",
+  "required": ["customer", "items"],
+  "properties": {
+    "customer": {
+      "type": "object", "title": "Клиент",
+      "required": ["name"],
+      "properties": { "name": { "type": "string", "minLength": 1 } }
+    },
+    "items": {
+      "type": "array", "title": "Позиции",
+      "items": {
+        "type": "object",
+        "required": ["name", "quantity", "price_minor"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "price_minor": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "show_terms": { "type": "boolean", "default": true }
+  },
+  "x-leafrun-ui": { "order": ["customer", "items", "show_terms"] }
+}

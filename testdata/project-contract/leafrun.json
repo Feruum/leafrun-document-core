@@ -1,0 +1,30 @@
+{
+  "formatVersion": 1,
+  "name": "sales-documents",
+  "engine": { "typstVersion": "0.15.1" },
+  "templates": [
+    { "id": "invoice", "entrypoint": "templates/invoice.typ",
+      "inputSchema": "schemas/sales.schema.json" },
+    { "id": "contract", "entrypoint": "templates/contract.typ",
+      "inputSchema": "schemas/sales.schema.json" },
+    { "id": "act", "entrypoint": "templates/act.typ",
+      "inputSchema": "schemas/sales.schema.json" }
+  ],
+  "targets": [
+    { "id": "invoice", "kind": "document", "template": "invoice",
+      "inputSchema": "schemas/sales.schema.json",
+      "output": { "format": "pdf", "path": "output/result.pdf" } },
+    { "id": "sales-pack", "kind": "bundle",
+      "inputSchema": "schemas/sales.schema.json",
+      "steps": [
+        { "id": "contract", "template": "contract", "inputPointer": "" },
+        { "id": "invoice", "template": "invoice", "inputPointer": "" },
+        { "id": "act", "template": "act", "inputPointer": "" }
+      ],
+      "order": ["contract", "invoice", "act"],
+      "output": { "format": "zip", "path": "output/sales-pack/result.zip" }
+    }
+  ],
+  "profiles": { "draft": {}, "production": {} },
+  "defaultProfile": "production"
+}

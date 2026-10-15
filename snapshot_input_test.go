@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"testing/fstest"
 )
@@ -259,6 +261,182 @@ func TestCreateInputSnapshotLimitsCancellationAndClosedBase(t *testing.T) {
 	}
 	if snapshot, err := CreateInputSnapshot(context.Background(), base, input, CreateInputSnapshotOptions{TempDir: t.TempDir()}); snapshot != nil || !errors.Is(err, ErrSnapshotClosed) {
 		t.Fatalf("closed base accepted: snapshot=%v err=%v", snapshot, err)
+	}
+}
+
+func TestCreatePreparedSnapshotVerifiesFilesAndKeepsCapturedFontsAfterSourceRemoval(t *testing.T) {
+	requireRealTypst(t)
+	fontBytes, err := os.ReadFile("examples/invoice/fonts/FiraSans-Regular.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	fontSource := t.TempDir()
+	writeTestFile(t, filepath.Join(project, "main.typ"), "#set text(font: \"Fira Sans\")\n#let data = json(sys.inputs.at(\"leafrun-data\"))\n#assert(data.at(\"details\").at(\"count\") == 7)\n#assert(data.at(\"label\") == sys.inputs.at(\"watermark\"))\n#image(data.at(\"image\"), width: 20pt)\n#data.at(\"label\")")
+	if err := os.WriteFile(filepath.Join(fontSource, "FiraSans-Regular.ttf"), fontBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	base, err := CreateSnapshot(context.Background(), FolderSource{Root: project}, SnapshotOptions{TempDir: t.TempDir(), FontPaths: []string{fontSource}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := base.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	baseManifest := base.Manifest()
+	if err := os.RemoveAll(fontSource); err != nil {
+		t.Fatal(err)
+	}
+	imageBytes := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="red"/></svg>`)
+	digest := sha256.Sum256(imageBytes)
+	ref := FileRef{Pointer: "/image", ResourceID: "resource-image", Filename: "mark.svg", SizeBytes: int64(len(imageBytes)), SHA256: hex.EncodeToString(digest[:])}
+	schemaFS := fstest.MapFS{"schemas/input.json": &fstest.MapFile{Data: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["label","image","details"],"properties":{"label":{"type":"string"},"image":{"type":"string","x-leafrun-file":true},"details":{"type":"object","properties":{"count":{"type":"integer","default":7}}}}}`)}}
+	type renderCase struct {
+		label    string
+		snapshot *Snapshot
+		output   string
+	}
+	cases := make([]renderCase, 0, 2)
+	for _, label := range []string{"invoice-a", "invoice-b"} {
+		prepared, err := PrepareParameters(context.Background(), schemaFS, "schemas/input.json", []byte(`{"label":"`+label+`","details":{}}`), []FileRef{ref})
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared.Inputs["watermark"] = label
+		if err := VerifyPreparedInput(context.Background(), schemaFS, "schemas/input.json", prepared); err != nil {
+			t.Fatalf("VerifyPreparedInput() rejected prepared bytes: %v", err)
+		}
+		derived, err := CreatePreparedSnapshot(context.Background(), base, prepared, func(context.Context, PreparedFile) (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(imageBytes)), nil
+		}, CreateInputSnapshotOptions{TempDir: t.TempDir()})
+		if err != nil {
+			t.Fatalf("CreatePreparedSnapshot() error = %v", err)
+		}
+		t.Cleanup(func() {
+			if err := derived.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		cases = append(cases, renderCase{label: label, snapshot: derived, output: filepath.Join(t.TempDir(), label+".pdf")})
+	}
+	if !reflect.DeepEqual(base.Manifest(), baseManifest) {
+		t.Fatal("prepared snapshot changed its source manifest")
+	}
+	for index, testCase := range cases {
+		if got, err := fs.ReadFile(testCase.snapshot.FS(), ".leafrun-input/"+ref.SHA256+".svg"); err != nil || !bytes.Equal(got, imageBytes) {
+			t.Fatalf("derived file bytes = %q, %v", got, err)
+		}
+		if got, err := fs.ReadFile(testCase.snapshot.FS(), "input.json"); err != nil || !bytes.Contains(got, []byte(testCase.label)) || !bytes.Contains(got, []byte(`"count":7`)) {
+			t.Fatalf("prepared input JSON %d = %q, %v", index, got, err)
+		}
+		if testCase.snapshot.Manifest().ID == baseManifest.ID {
+			t.Fatal("derived snapshot content ID did not include prepared inputs")
+		}
+	}
+	var wait sync.WaitGroup
+	errs := make([]error, len(cases))
+	results := make([]RenderResult, len(cases))
+	for index, testCase := range cases {
+		wait.Add(1)
+		go func(index int, testCase renderCase) {
+			defer wait.Done()
+			results[index], errs[index] = RenderSnapshot(context.Background(), testCase.snapshot, RenderSnapshotOptions{
+				Output: testCase.output, Inputs: map[string]string{"leafrun-data": "/input.json", "watermark": testCase.label}, PDFStandard: "1.7",
+			})
+		}(index, testCase)
+	}
+	wait.Wait()
+	for index, err := range errs {
+		if err != nil {
+			t.Fatalf("Typst did not render parallel prepared input %d: %v", index, err)
+		}
+	}
+	first, err := os.ReadFile(results[0].PDFPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(results[1].PDFPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) == 0 || len(second) == 0 || bytes.Equal(first, second) {
+		t.Fatal("parallel Typst renders did not retain independent prepared values")
+	}
+}
+
+func TestCreatePreparedSnapshotOpensIdenticalGeneratedPathOnce(t *testing.T) {
+	content := []byte("same verified bytes")
+	digest := sha256.Sum256(content)
+	hash := hex.EncodeToString(digest[:])
+	schema := `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"first":{"type":"string","x-leafrun-file":true},"second":{"type":"string","x-leafrun-file":true}}}`
+	prepared, err := PrepareParameters(context.Background(), parameterSchemaFS(schema), "schemas/input.json", []byte(`{}`), []FileRef{
+		{Pointer: "/second", ResourceID: "resource-second", Filename: "same.svg", SizeBytes: int64(len(content)), SHA256: hash},
+		{Pointer: "/first", ResourceID: "resource-first", Filename: "same.svg", SizeBytes: int64(len(content)), SHA256: hash},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := CreateSnapshot(context.Background(), &snapshotTestSource{tree: SourceTree{FS: fstestMapFS("main.typ", []byte("base"))}}, SnapshotOptions{TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer base.Close()
+	openCount := 0
+	derived, err := CreatePreparedSnapshot(context.Background(), base, prepared, func(_ context.Context, file PreparedFile) (io.ReadCloser, error) {
+		openCount++
+		if file.Pointer != "/first" {
+			t.Errorf("representative file reference = %q, want sorted first pointer", file.Pointer)
+		}
+		return io.NopCloser(bytes.NewReader(content)), nil
+	}, CreateInputSnapshotOptions{TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("CreatePreparedSnapshot() error = %v", err)
+	}
+	defer derived.Close()
+	if openCount != 1 {
+		t.Fatalf("opener called %d times for one generated path", openCount)
+	}
+	if got, err := fs.ReadFile(derived.FS(), ".leafrun-input/"+hash+".svg"); err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("captured file bytes = %q, %v", got, err)
+	}
+}
+
+func TestCreatePreparedSnapshotRejectsReservedRootAndChangedBytes(t *testing.T) {
+	content := []byte("expected")
+	digest := sha256.Sum256(content)
+	ref := FileRef{Pointer: "/file", ResourceID: "resource-file", Filename: "file.bin", SizeBytes: int64(len(content)), SHA256: hex.EncodeToString(digest[:])}
+	prepared, err := PrepareParameters(context.Background(), fstest.MapFS{"schema.json": &fstest.MapFile{Data: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"file":{"type":"string","x-leafrun-file":true}}}`)}}, "schema.json", []byte(`{}`), []FileRef{ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := CreateSnapshot(context.Background(), &snapshotTestSource{tree: SourceTree{FS: fstestMapFS("main.typ", []byte("base"))}}, SnapshotOptions{TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer base.Close()
+	if got, err := CreatePreparedSnapshot(context.Background(), base, prepared, func(context.Context, PreparedFile) (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader([]byte("tampered"))), nil
+	}, CreateInputSnapshotOptions{TempDir: t.TempDir()}); got != nil || err == nil {
+		if got != nil {
+			_ = got.Close()
+		}
+		t.Fatal("accepted input bytes that differ from the frozen size and hash")
+	}
+
+	reserved, err := CreateSnapshot(context.Background(), &snapshotTestSource{tree: SourceTree{FS: fstestMapFS(".leafrun-input/existing.svg", []byte("source"))}}, SnapshotOptions{TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reserved.Close()
+	if got, err := CreatePreparedSnapshot(context.Background(), reserved, prepared, func(context.Context, PreparedFile) (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(content)), nil
+	}, CreateInputSnapshotOptions{TempDir: t.TempDir()}); got != nil || err == nil {
+		if got != nil {
+			_ = got.Close()
+		}
+		t.Fatal("accepted a source snapshot that owns the reserved input root")
 	}
 }
 

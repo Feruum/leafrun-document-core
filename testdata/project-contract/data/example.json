@@ -1,0 +1,8 @@
+{
+  "customer": { "name": "ООО Пример" },
+  "items": [
+    { "name": "Подготовка", "quantity": 2, "price_minor": 15000 },
+    { "name": "Проверка", "quantity": 1, "price_minor": 5000 }
+  ],
+  "show_terms": true
+}

@@ -49,6 +49,12 @@ func runCompiler(ctx context.Context, engine string, paths projectPaths, pdfTemp
 	for _, fontPath := range paths.fonts {
 		args = append(args, "--font-path", fontPath)
 	}
+	for _, key := range sortedProjectStringKeys(paths.inputs) {
+		args = append(args, "--input", key+"="+paths.inputs[key])
+	}
+	if paths.pdfStandard != "" {
+		args = append(args, "--pdf-standard", paths.pdfStandard)
+	}
 	args = append(args, paths.entry, pdfTemp)
 	command := exec.CommandContext(ctx, engine, args...)
 	// Custom font roots must come from validated RenderOptions or project/fonts.
