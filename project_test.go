@@ -427,7 +427,8 @@ func mutableProjectFixtureFS(t *testing.T) *fstest.MapFS {
 
 func editManifest(t *testing.T, files *fstest.MapFS, old, replacement string) {
 	t.Helper()
-	content := string((*files)["leafrun.json"].Data)
+	// Git checkouts may use CRLF; mutation needles describe logical JSON lines.
+	content := strings.ReplaceAll(string((*files)["leafrun.json"].Data), "\r\n", "\n")
 	if !strings.Contains(content, old) {
 		t.Fatalf("manifest fixture does not contain %q", old)
 	}
