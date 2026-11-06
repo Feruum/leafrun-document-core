@@ -21,10 +21,12 @@ jobs:
           }
           checkout_mr core document-core 21 08cc0374bbf18aa9db607423b09c92609a2d130c
           checkout_mr adapter integrations 4 8f1330455c3ca1267f82df1446087670c5dd55fe
-      - uses: actions/setup-go@924ae3a1cded613372ab5596fb5720e22ba16
-        with:
-          go-version: '1.27.0'
-          cache: false
+      - name: Select the pinned Go toolchain
+        shell: bash
+        run: |
+          command -v go || brew install go
+          echo GOTOOLCHAIN=go1.27.0 >> "$GITHUB_ENV"
+          GOTOOLCHAIN=go1.27.0 go version
       - name: Standalone Core, published modules, native race and invoice
         working-directory: core
         shell: pwsh
@@ -35,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(go env GOOS)" = darwin
-          export GOTOOLCHAIN=local GOFLAGS=-mod=readonly
+          export GOTOOLCHAIN=go1.27.0 GOFLAGS=-mod=readonly
           export PATH="$(dirname "$(find "$PWD/core/.tools" -type f -name typst -print -quit)"):$PATH"
           typst --version
           (cd adapter && GOWORK=off go test -race -count=1 -timeout=20m ./... && GOWORK=off go vet ./... && GOWORK=off go build ./...)
@@ -55,3 +57,4 @@ jobs:
           if test -f core/.cache/ci-native/receipt.json; then
             cat core/.cache/ci-native/receipt.json | tee -a "$GITHUB_STEP_SUMMARY"
           fi
+
