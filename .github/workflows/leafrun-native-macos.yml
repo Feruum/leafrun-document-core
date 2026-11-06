@@ -20,7 +20,12 @@ jobs:
           git init -q harness
           git -C harness fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
           git -C harness checkout -q --detach "$GITHUB_SHA"
+      - name: Bootstrap Go on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          command -v go || brew install go
+          GOTOOLCHAIN=go1.27.0 go version
       - name: Verify standalone Core and render the invoice
         shell: pwsh
         run: ./harness/qualification/run.ps1
-
