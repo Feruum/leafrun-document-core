@@ -1,0 +1,57 @@
+name: Leafrun native macOS MR verification
+on:
+  push:
+    branches: [ci/lea-6-macos-mr-21]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Fetch and verify the public GitLab review revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          checkout_mr() {
+            git init -q "$1"
+            git -C "$1" fetch -q "https://gitlab.com/leafrun/leafrun-$2.git" "refs/merge-requests/$3/head"
+            test "$(git -C "$1" rev-parse FETCH_HEAD)" = "$4"
+            git -C "$1" checkout -q --detach "$4"
+          }
+          checkout_mr core document-core 21 08cc0374bbf18aa9db607423b09c92609a2d130c
+          checkout_mr adapter integrations 4 8f1330455c3ca1267f82df1446087670c5dd55fe
+      - uses: actions/setup-go@924ae3a1cded613372ab5596fb5720e22ba16
+        with:
+          go-version: '1.27.0'
+          cache: false
+      - name: Standalone Core, published modules, native race and invoice
+        working-directory: core
+        shell: pwsh
+        run: ./scripts/ci-native.ps1
+      - name: Standalone adapter plus paired Core race, vet, build and invoice
+        if: success() || failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go env GOOS)" = darwin
+          export GOTOOLCHAIN=local GOFLAGS=-mod=readonly
+          export PATH="$(dirname "$(find "$PWD/core/.tools" -type f -name typst -print -quit)"):$PATH"
+          typst --version
+          (cd adapter && GOWORK=off go test -race -count=1 -timeout=20m ./... && GOWORK=off go vet ./... && GOWORK=off go build ./...)
+          go work init ./core ./adapter
+          export GOWORK="$PWD/go.work"
+          cd core
+          go test -race -count=1 -timeout=20m ./...
+          go vet ./...
+          go build ./...
+          go run ./cmd/leafrun render --project ./examples/invoice --output "$RUNNER_TEMP/paired.pdf"
+          test "$(head -c 5 "$RUNNER_TEMP/paired.pdf")" = '%PDF-'
+          git diff --exit-code -- go.mod go.sum
+      - name: Publish standalone summary
+        if: always()
+        shell: bash
+        run: |
+          if test -f core/.cache/ci-native/receipt.json; then
+            cat core/.cache/ci-native/receipt.json | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
