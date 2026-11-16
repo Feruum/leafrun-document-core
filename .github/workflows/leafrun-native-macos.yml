@@ -1,7 +1,7 @@
-name: Leafrun standalone release rehearsal
+name: Leafrun main public-proxy qualification
 on:
   push:
-    branches: [ci/lea-6-macos-mr-21]
+    branches: [ci/lea-6-public-proxy-main]
 permissions:
   contents: read
 jobs:
@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - name: Fetch the exact public review harness
+      - name: Fetch the exact public qualification harness
         shell: bash
         run: |
           set -euo pipefail
